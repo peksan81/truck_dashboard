@@ -22,7 +22,7 @@
             measurementId: "G-42RMFB41Q2"
         };
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
-        const ADMIN_PIN = "0502"; // TVOJ ADMIN PIN
+        const ADMIN_PIN = "1234"; 
 
         let app, auth, provider;
         try {
@@ -91,13 +91,38 @@
             fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, { method: "POST", mode: "no-cors" });
         }
 
+        // --- PREVENT LOOPING: Validate before redirect ---
+        async function validateAndRedirect(key) {
+            try {
+                const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(key)}`);
+                const data = await response.json();
+                if (data.status === 'allowed') {
+                    window.location.href = "dashboard.html";
+                } else {
+                    // Key is bad, remove it to stop loop
+                    console.warn("Invalid saved key, clearing...");
+                    localStorage.removeItem('my_access_key');
+                    location.reload(); 
+                }
+            } catch (e) {
+                // Offline? Let them try, dashboard will handle it
+                window.location.href = "dashboard.html";
+            }
+        }
+
         if(auth) {
             onAuthStateChanged(auth, (user) => {
                 const key = localStorage.getItem('my_access_key');
-                // If admin, redirect handled at top.
-                // If user logged in and has key, redirect.
-                if (user && key && localStorage.getItem('admin_mode') !== 'true') {
-                    window.location.href = "dashboard.html";
+                const isAdmin = localStorage.getItem('admin_mode') === 'true';
+
+                if (isAdmin) {
+                     window.location.href = "dashboard.html";
+                     return;
+                }
+
+                if (user && key) {
+                    // STOP LOOP: Verify key before redirecting
+                    validateAndRedirect(key);
                 } else {
                     document.getElementById('loader').classList.add('hidden');
                     document.getElementById('loginBox').classList.remove('hidden');
