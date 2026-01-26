@@ -34,7 +34,7 @@
 
         // --- LOAD LOGIC (PREVENTS LOOP) ---
         window.onload = function() {
-            // If Admin, SHOW PANEL instead of redirecting (Stops blinking)
+            // Ako je Admin, prikazi Admin Panel (NE RADI REDIRECT SAM)
             if (localStorage.getItem('admin_mode') === 'true') {
                 showAdminPanel();
             } else {
@@ -103,7 +103,7 @@
             const pin = prompt("Enter Admin PIN:");
             if (pin === ADMIN_PIN) {
                 localStorage.setItem('admin_mode', 'true');
-                showAdminPanel(); // Show panel, don't redirect automatically
+                showAdminPanel(); // Prikazi panel, ne redirect
             } else if (pin !== null) {
                 alert("Wrong PIN");
             }
@@ -122,20 +122,21 @@
         function showAdminPanel() {
             document.getElementById('loader').classList.add('hidden');
             document.getElementById('loginBox').classList.add('hidden');
-            document.getElementById('welcomeBox').classList.add('hidden'); // Ensure welcome is hidden
+            document.getElementById('welcomeBox').classList.add('hidden');
             document.getElementById('adminBox').classList.remove('hidden');
         }
 
         function showUserPanel(email) {
             document.getElementById('loader').classList.add('hidden');
             document.getElementById('loginBox').classList.add('hidden');
-            document.getElementById('adminBox').classList.add('hidden'); // Ensure admin is hidden
+            document.getElementById('adminBox').classList.add('hidden');
             document.getElementById('welcomeBox').classList.remove('hidden');
             document.getElementById('welcomeEmail').innerText = email;
         }
 
         window.goToDashboard = function() {
-            window.location.href = "dashboard.html";
+            // Dodajemo timestamp da sprecimo kesiranje
+            window.location.href = "dashboard.html?t=" + new Date().getTime();
         }
     </script>
 </head>
