@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizer Plaćanja</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f4f9; padding: 10px; margin: 0; }
+        
+        /* INPUT DEO */
+        .input-box { background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        textarea { width: 100%; height: 80px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: monospace; }
+        
+        /* Dugmici u headeru */
+        .btn-container { margin-top: 5px; display: flex; gap: 10px; align-items: center; }
+        
+        .btn-main { background: #2563eb; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .btn-main:hover { background: #1d4ed8; }
+
+        /* Crveno dugme za reset */
+        .btn-reset { background: #ef4444; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .btn-reset:hover { background: #dc2626; }
+
+        /* VALIDACIJA KUTIJA */
+        #validation-box { 
+            margin-top: 10px; 
+            padding: 10px; 
+            border-radius: 6px; 
+            font-weight: bold; 
+            display: none; 
+            font-size: 0.95em;
+            border: 1px solid transparent;
+        }
+
+        /* TABLA */
+        .board { display: flex; gap: 6px; overflow-x: auto; min-height: 85vh; align-items: flex-start; padding-bottom: 10px; }
+        
+        /* KOLONE */
+        .column { flex: 1; min-width: 170px; background: #e5e7eb; border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+        
+        /* Header kolone */
+        .col-header { font-weight: bold; display: flex; justify-content: space-between; align-items: center; background: #d1d5db; padding: 6px 8px; border-radius: 4px; color: #374151; font-size: 0.95em; }
+        
+        /* Total box */
+        .total-box { text-align: center; background: rgba(255,255,255,0.8); padding: 5px; border-radius: 4px; font-weight: bold; font-size: 0.9em; color: #111827; border: 1px solid #d1d5db; }
+
+        /* KARTICE */
+        .card { background: white; padding: 8px; border-radius: 4px; border-left: 4px solid #2563eb; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-size: 13px; position: relative; transition: transform 0.1s; }
+        .card:hover { transform: translateY(-1px); box-shadow: 0 3px 5px rgba(0,0,0,0.1); }
+        .card.paid { border-left-color: #10b981; background: #ecfdf5; } 
+        
+        .row-top { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px; }
+        .truck { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; color: #4b5563; font-weight: bold; border: 1px solid #e5e7eb; }
+        .amount { color: #dc2626; font-size: 1.1em; font-weight: 800; }
+        .owner { font-weight: 700; color: #1f2937; margin-bottom: 2px; display: block; font-size: 1.05em; line-height: 1.2; }
+        .note { font-size: 0.85em; color: #6b7280; font-style: italic; display: block; margin-bottom: 5px; line-height: 1.2; }
+
+        /* DUGMICI NA KARTICI */
+        .actions { display: flex; gap: 2px; margin-top: 6px; border-top: 1px solid #f3f4f6; padding-top: 6px; }
+        .move-btn { flex: 1; border: 1px solid #d1d5db; background: #fff; border-radius: 3px; cursor: pointer; font-size: 10px; text-align: center; padding: 4px 0; transition: all 0.2s; font-weight: 600; }
+        
+        /* Boje dugmica za dane */
+        .to-sre:hover { background: #fef9c3; border-color: #eab308; color: #854d0e; }
+        .to-cet:hover { background: #cffafe; border-color: #06b6d4; color: #155e75; }
+        .to-pet:hover { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
+        .to-pon:hover { background: #dcfce7; border-color: #22c55e; color: #166534; }
+        
+        /* Dugme za nazad (X) */
+        .to-back { color: #9ca3af; font-weight: bold; max-width: 20px; }
+        .to-back:hover { background: #f3f4f6; color: #dc2626; }
+
+        /* Aktivno dugme (označava trenutni dan) */
+        .active-day { background-color: #e5e7eb; color: #6b7280; cursor: default; border-color: #e5e7eb; }
+
+        /* COPY DUGME */
+        .copy-btn { background: #059669; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; font-weight: bold; }
+        .copy-btn:hover { background: #047857; }
+
+    </style>
+</head>
+<body>
+
+<div class="input-box">
+    <h3>1. Nalepi podatke ovde:</h3>
+    <textarea id="rawInput" placeholder="Nalepi onaj tekst sa crticama..."></textarea>
+    <div class="btn-container">
+        <button class="btn-main" onclick="processData()">NAPRAVI KARTICE</button>
+        <button class="btn-reset" onclick="resetAll()">RESET (NOVI SPISAK)</button>
+    </div>
+    <!-- KUTIJA ZA VALIDACIJU -->
+    <div id="validation-box"></div>
+</div>
+
+<div class="board" id="board"></div>
+
+<script>
+    let drivers = [];
+    const columns = [
+        { id: 'unassigned', label: 'Neraspoređeno' },
+        { id: 'sreda', label: 'Sreda' },
+        { id: 'cetvrtak', label: 'Četvrtak' },
+        { id: 'petak', label: 'Petak' },
+        { id: 'ponedeljak', label: 'Ponedeljak' }
+    ];
+
+    // Funkcija za dobijanje dana u nedelji
+    function getDayName(dateString) {
+        const days = ['NEDELJA', 'PONEDELJAK', 'UTORAK', 'SREDA', 'ČETVRTAK', 'PETAK', 'SUBOTA'];
+        let d = new Date(dateString);
+        if(isNaN(d.getTime())) return "";
+        return days[d.getDay()];
+    }
+
+    function formatMoney(amount) {
+        return '$' + amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function processData() {
+        const text = document.getElementById('rawInput').value;
+        const blocks = text.split('--------------------');
+        
+        drivers = [];
+
+        blocks.forEach(block => {
+            if (!block.trim() || block.includes("TOTAL:") || block.includes("CEKOVI")) return;
+
+            let truck = ""; 
+            let ownerRaw = "Nepoznat";
+            let accountRaw = "";
+            let amount = "0.00";
+            let note = "";
+            let paidStatus = ""; 
+            
+            const lines = block.trim().split('\n').map(l => l.trim()).filter(l => l !== "");
+            if(lines.length === 0) return;
+
+            let hasKeywords = false; 
+
+            // --- PARSIRANJE ---
+            lines.forEach(line => {
+                const lower = line.toLowerCase();
+                
+                // Provera za PLAĆENO i izvlačenje datuma
+                if (lower.includes("placeno") || lower.includes("plaćeno")) {
+                    let dateMatch = line.match(/\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}/);
+                    if (dateMatch) {
+                        let dateStr = dateMatch[0];
+                        let dayName = getDayName(dateStr);
+                        if (dayName) {
+                            paidStatus = `VEĆ PLAĆENO - ${dayName} (${dateStr})`;
+                        } else {
+                            paidStatus = `VEĆ PLAĆENO ${dateStr}`;
+                        }
+                    } else {
+                        paidStatus = "VEĆ PLAĆENO";
+                    }
+                }
+                
+                if (lower.startsWith('truck')) {
+                    hasKeywords = true;
+                    let parts = line.split(/[:#]/);
+                    for(let i=1; i<parts.length; i++) {
+                        let val = parts[i].trim();
+                        if(val) { truck = val; break; }
+                    }
+                    if(!truck && !line.includes(':') && !line.includes('#')) {
+                         let val = line.substring(5).trim();
+                         if(val) truck = val;
+                    }
+                }
+                else if (lower.startsWith('owner:')) { hasKeywords = true; ownerRaw = line.split(':')[1]?.trim(); }
+                else if (lower.startsWith('account:')) {
+                    hasKeywords = true;
+                    accountRaw = line.split(':')[1]?.trim();
+                }
+                else if (lower.startsWith('amount:')) { hasKeywords = true; amount = line.split(':')[1]?.trim(); }
+                else if (lower.startsWith('note:')) { hasKeywords = true; note += line.split(':')[1]?.trim() + " "; }
+            });
+
+            if (!hasKeywords) return;
+
+            // --- ODLUČIVANJE O IMENU ---
+            let finalName = ownerRaw;
+
+            if (accountRaw && ownerRaw !== "Nepoznat") {
+                if (areNamesSimilar(accountRaw, ownerRaw)) {
+                    finalName = ownerRaw;
+                } else {
+                    finalName = accountRaw;
+                }
+            } else if (ownerRaw === "Nepoznat" && accountRaw) {
+                finalName = accountRaw;
+            }
+
+            // --- ODLUČIVANJE O BROJU KAMIONA ---
+            if (!truck) {
+                const trLine = lines.find(l => l.toLowerCase().includes('truck'));
+                if(trLine) {
+                     let parts = trLine.split(/[:#]/);
+                     for(let i=1; i<parts.length; i++) {
+                        let val = parts[i].trim();
+                        if(val) { truck = val; break; }
+                    }
+                }
+            }
+
+            if (!truck && finalName !== "Nepoznat") {
+                truck = finalName; 
+            }
+            
+            if (!truck) truck = "???";
+
+            drivers.push({
+                id: Math.random().toString(36).substr(2, 9),
+                truck: truck,
+                owner: finalName, 
+                amount: amount,
+                note: note,
+                paidStatus: paidStatus,
+                col: 'unassigned'
+            });
+        });
+
+        // --- VALIDACIJA TOTALA ---
+        checkTotal(text);
+
+        render();
+    }
+
+    function checkTotal(rawText) {
+        // 1. Izračunaj zbir svih kartica
+        let calculatedSum = drivers.reduce((sum, d) => {
+            let clean = d.amount.replace(/[^0-9.-]+/g,"");
+            return sum + (parseFloat(clean) || 0);
+        }, 0);
+
+        // 2. Pokušaj da nađeš TOTAL u tekstu (POSLEDNJI U TEKSTU)
+        const regex = /TOTAL:?\s*\$([\d,]+\.?\d*)/gi;
+        const matches = [...rawText.matchAll(regex)];
+        
+        let inputTotal = 0;
+        let foundTotal = false;
+
+        if (matches.length > 0) {
+            const lastMatch = matches[matches.length - 1];
+            inputTotal = parseFloat(lastMatch[1].replace(/,/g, ''));
+            foundTotal = true;
+        }
+
+        const valBox = document.getElementById('validation-box');
+        valBox.style.display = 'block';
+
+        if (!foundTotal) {
+            valBox.style.background = '#e0f2fe';
+            valBox.style.color = '#0369a1';
+            valBox.style.border = '1px solid #bae6fd';
+            valBox.innerHTML = `ℹ️ Ukupan zbir kartica: ${formatMoney(calculatedSum)} (Nisam našao 'TOTAL:' u tekstu za poređenje)`;
+            return;
+        }
+
+        const diff = Math.abs(inputTotal - calculatedSum);
+        
+        // STROGA TOLERANCIJA - Mora biti manja od 1 centa (0.01)
+        if (diff < 0.01) { 
+            valBox.style.background = '#dcfce7';
+            valBox.style.color = '#15803d';
+            valBox.style.border = '1px solid #86efac';
+            valBox.innerHTML = `✅ SAVRŠENO! Tvoj tekst kaže ${formatMoney(inputTotal)}, a kartice kažu ${formatMoney(calculatedSum)}. Sve se slaže!`;
+        } else {
+            valBox.style.background = '#fee2e2';
+            valBox.style.color = '#b91c1c';
+            valBox.style.border = '1px solid #fca5a5';
+            valBox.innerHTML = `⚠️ UPOZORENJE! Tvoj tekst kaže <b>${formatMoney(inputTotal)}</b>, a kartice kažu <b>${formatMoney(calculatedSum)}</b>.<br>Razlika je: <b>${formatMoney(diff)}</b>. Proveri da li neko fali!`;
+        }
+    }
+
+    // --- FUNKCIJA ZA POTPUNI RESET ---
+    function resetAll() {
+        // Sklonjen confirm jer blokira u nekim pregledačima - SADA RADI TRENUTNO
+        document.getElementById('rawInput').value = ''; 
+        document.getElementById('validation-box').style.display = 'none'; 
+        drivers = []; 
+        render(); 
+    }
+
+    function areNamesSimilar(name1, name2) {
+        if(!name1 || !name2) return false;
+        const s1 = name1.toLowerCase();
+        const s2 = name2.toLowerCase();
+        
+        if (s1.includes(s2) || s2.includes(s1)) return true;
+        
+        const words1 = s1.split(/[\s\d\W]+/).filter(w => w.length > 2);
+        const words2 = s2.split(/[\s\d\W]+/).filter(w => w.length > 2);
+        
+        for (let w of words1) {
+            if (words2.includes(w)) return true;
+        }
+        return false;
+    }
+
+    function render() {
+        const board = document.getElementById('board');
+        board.innerHTML = '';
+
+        columns.forEach(col => {
+            const colDiv = document.createElement('div');
+            colDiv.className = 'column';
+            
+            const header = document.createElement('div');
+            header.className = 'col-header';
+            header.innerHTML = `<span>${col.label}</span> <button class="copy-btn" onclick="copyCol('${col.id}')">COPY</button>`;
+            
+            const colDrivers = drivers.filter(d => d.col === col.id);
+            
+            let total = 0;
+            colDrivers.forEach(d => {
+                let clean = d.amount.replace(/[^0-9.-]+/g,"");
+                total += parseFloat(clean) || 0;
+            });
+            
+            const totalDiv = document.createElement('div');
+            totalDiv.className = 'total-box';
+            totalDiv.innerText = `Total: $${total.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+
+            colDiv.appendChild(header);
+            colDiv.appendChild(totalDiv);
+
+            colDrivers.forEach(drv => {
+                const card = document.createElement('div');
+                card.className = `card ${drv.paidStatus ? 'paid' : ''}`;
+                
+                let displayId = drv.truck;
+                if (/^\d+$/.test(displayId) || (displayId.length < 6 && /\d/.test(displayId))) {
+                    displayId = '#' + displayId;
+                }
+
+                let actionsHtml = `
+                    <div class="move-btn to-sre ${col.id==='sreda'?'active-day':''}" onclick="move('${drv.id}', 'sreda')">Sre</div>
+                    <div class="move-btn to-cet ${col.id==='cetvrtak'?'active-day':''}" onclick="move('${drv.id}', 'cetvrtak')">Čet</div>
+                    <div class="move-btn to-pet ${col.id==='petak'?'active-day':''}" onclick="move('${drv.id}', 'petak')">Pet</div>
+                    <div class="move-btn to-pon ${col.id==='ponedeljak'?'active-day':''}" onclick="move('${drv.id}', 'ponedeljak')">Pon</div>
+                    <div class="move-btn to-back" onclick="move('${drv.id}', 'unassigned')">x</div>
+                `;
+
+                card.innerHTML = `
+                    <div class="row-top">
+                        <span class="truck">${displayId}</span>
+                        <span class="amount">${drv.amount}</span>
+                    </div>
+                    <span class="owner">${drv.owner}</span>
+                    ${drv.note ? `<span class="note">${drv.note}</span>` : ''}
+                    ${drv.paidStatus ? `<span class="note" style="color:green;font-weight:bold">${drv.paidStatus}</span>` : ''}
+                    <div class="actions">${actionsHtml}</div>
+                `;
+                colDiv.appendChild(card);
+            });
+
+            board.appendChild(colDiv);
+        });
+    }
+
+    function move(id, targetCol) {
+        const drv = drivers.find(d => d.id === id);
+        if(drv) { drv.col = targetCol; render(); }
+    }
+
+    function copyCol(colId) {
+        const colLabel = columns.find(c => c.id === colId).label;
+        const colDrivers = drivers.filter(d => d.col === colId);
+
+        if(colDrivers.length === 0) { alert("Nema nikoga u koloni " + colLabel); return; }
+
+        let text = `${colLabel.toUpperCase()}\n\n===================\n\n`;
+        let total = 0;
+
+        colDrivers.forEach(d => {
+            let firstName = d.owner.split(' ')[0];
+            text += `${d.truck} - ${firstName} - ${d.amount}\n`;
+            
+            let clean = d.amount.replace(/[^0-9.-]+/g,"");
+            total += parseFloat(clean) || 0;
+        });
+
+        text += `\nTOTAL: $${total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            alert("Kopirano za " + colLabel + "!");
+        } catch (err) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert("Kopirano za " + colLabel + "!");
+            }).catch(e => alert("Greška pri kopiranju: " + e));
+        }
+        document.body.removeChild(textArea);
+    }
+</script>
+
+</body>
+</html>
