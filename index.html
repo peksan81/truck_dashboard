@@ -11,7 +11,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // SETTINGS
+        // --- SETTINGS ---
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -32,14 +32,12 @@
             setPersistence(auth, browserLocalPersistence);
         } catch (e) { console.error(e); }
 
-        // --- CHECK MODE ON LOAD ---
-        // Ne radimo automatski redirect da ne bi doslo do blinkanja (loop-a)
-        // Umesto toga, prikazujemo odgovarajuci UI
+        // --- LOAD LOGIC (PREVENTS LOOP) ---
         window.onload = function() {
+            // If Admin, SHOW PANEL instead of redirecting (Stops blinking)
             if (localStorage.getItem('admin_mode') === 'true') {
                 showAdminPanel();
             } else {
-                // Pokreni Firebase proveru samo ako nismo u Admin modu
                 if(auth) startAuthListener();
             }
         };
@@ -48,7 +46,6 @@
             onAuthStateChanged(auth, (user) => {
                 const key = localStorage.getItem('my_access_key');
                 if (user && key) {
-                    // Korisnik je spreman - Prikazi dugme za ulaz
                     showUserPanel(user.email);
                 } else {
                     document.getElementById('loader').classList.add('hidden');
@@ -62,7 +59,7 @@
             });
         }
 
-        // --- LOGIC ---
+        // --- ACTIONS ---
         window.checkGateCode = async function() {
             const btn = document.getElementById('verifyBtn');
             const key = document.getElementById('gateInput').value.trim();
@@ -106,7 +103,7 @@
             const pin = prompt("Enter Admin PIN:");
             if (pin === ADMIN_PIN) {
                 localStorage.setItem('admin_mode', 'true');
-                showAdminPanel();
+                showAdminPanel(); // Show panel, don't redirect automatically
             } else if (pin !== null) {
                 alert("Wrong PIN");
             }
@@ -121,16 +118,18 @@
             location.reload();
         }
 
-        // UI HELPERS
+        // --- UI HELPERS ---
         function showAdminPanel() {
             document.getElementById('loader').classList.add('hidden');
             document.getElementById('loginBox').classList.add('hidden');
+            document.getElementById('welcomeBox').classList.add('hidden'); // Ensure welcome is hidden
             document.getElementById('adminBox').classList.remove('hidden');
         }
 
         function showUserPanel(email) {
             document.getElementById('loader').classList.add('hidden');
             document.getElementById('loginBox').classList.add('hidden');
+            document.getElementById('adminBox').classList.add('hidden'); // Ensure admin is hidden
             document.getElementById('welcomeBox').classList.remove('hidden');
             document.getElementById('welcomeEmail').innerText = email;
         }
@@ -181,7 +180,7 @@
         </div>
     </div>
 
-    <!-- Admin Panel (Shows when Admin Mode is ON) -->
+    <!-- Admin Panel (Stops loop) -->
     <div id="adminBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden text-center">
         <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <i class="fas fa-user-shield text-3xl text-green-600"></i>
@@ -197,7 +196,7 @@
         </button>
     </div>
 
-    <!-- Welcome Back Panel (For normal users already logged in) -->
+    <!-- User Welcome Panel -->
     <div id="welcomeBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden text-center">
         <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <i class="fas fa-check text-3xl text-blue-600"></i>
