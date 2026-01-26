@@ -33,13 +33,16 @@
 
         // Main Function
         async function initDashboard() {
-            // --- 1. ADMIN CHECK (OVO JE FALILO!) ---
+            // --- 1. ADMIN CHECK ---
             if (localStorage.getItem('admin_mode') === 'true') {
                 const userEl = document.getElementById('userName');
                 if (userEl) {
                     userEl.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
                 }
-                // Ako je admin, prekidamo funkciju ovde - ne proveravamo kljuceve!
+                const adminIcon = document.getElementById('adminIcon');
+                if (adminIcon) adminIcon.classList.remove('hidden');
+                
+                // Stop here if admin (bypass other checks)
                 return; 
             }
 
@@ -84,7 +87,7 @@
         
         window.logout = function() {
             localStorage.removeItem('my_access_key');
-            localStorage.removeItem('admin_mode'); // Brise i admin status
+            localStorage.removeItem('admin_mode'); 
             
             if (auth) {
                 signOut(auth).then(() => goHome()).catch(() => goHome());
@@ -101,7 +104,7 @@
                     throw new Error("Preview mode");
                 }
             } catch (e) {
-                console.warn("Redirection blocked (preview mode). Showing fallback.");
+                console.warn("Redirection blocked (preview mode).");
                 document.body.innerHTML = `
                     <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
                         <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
@@ -165,6 +168,7 @@
         <div class="container mx-auto flex justify-between items-center">
             <div class="font-bold text-xl text-gray-700 dark:text-white flex items-center">
                 <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
+                <i id="adminIcon" class="fas fa-shield-alt text-green-500 ml-2 hidden" title="Admin Mode Active"></i>
             </div>
             
             <div class="flex items-center gap-4">
