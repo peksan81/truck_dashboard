@@ -77,7 +77,9 @@
         }
         
         window.logout = function() {
+            // 1. Clear key
             localStorage.removeItem('my_access_key');
+            // 2. Sign out from Google
             if (auth) {
                 signOut(auth).then(() => goHome()).catch(() => goHome());
             } else {
