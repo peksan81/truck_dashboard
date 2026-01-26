@@ -126,7 +126,7 @@
                 statusText.innerText = "Save failed!";
                 statusText.classList.remove('text-gray-400', 'text-green-600');
                 statusText.classList.add('text-red-500');
-                alert("Cloud Error: " + e.message);
+                alert("Cloud Error: " + e.message + "\n\nTip: Try the 'Backup' button (File download) instead if this persists.");
             } finally {
                 btn.disabled = false;
             }
@@ -164,7 +164,7 @@
                 } else { alert("No backup found in Cloud."); }
             } catch(e) { 
                 console.error(e);
-                alert("Cloud Error: " + e.message); 
+                alert("Cloud Error: " + e.message + "\n\nIf you have a .json file, use 'Restore' button instead."); 
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -240,7 +240,7 @@
             renderTable();
         };
 
-        // --- PDF PARSING ---
+        // --- PDF PARSING CORE ---
         async function extractDataFromPDF(file) {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -248,6 +248,7 @@
             const viewport = page.getViewport({ scale: 1.0 });
             const textContent = await page.getTextContent();
             
+            // Critical: Right side only
             const rightSideBoundary = viewport.width * 0.4;
             const rightSideItems = textContent.items.filter(item => item.transform[4] > rightSideBoundary);
             rightSideItems.sort((a, b) => b.transform[5] - a.transform[5]);
@@ -318,6 +319,7 @@
                             const nextTxt = textLines[i+1].text;
                             const isDate = /\d/.test(nextTxt) && (nextTxt.includes('-') || nextTxt.includes('/'));
                             const isUnit = /truck|unit|#/i.test(nextTxt);
+                            
                             if (!isDate && !isUnit && nextTxt.length > 2) {
                                 name = nextTxt;
                                 isCompanyDriver = true;
@@ -521,6 +523,7 @@
             };
 
             if (owners.length > 0) renderRows(owners);
+            
             if (drivers.length > 0) {
                 html += `<tr class="bg-gray-100 dark:bg-gray-700 font-bold text-gray-700 dark:text-gray-200"><td colspan="4" class="p-2 pl-4 text-xs uppercase tracking-wide">Company Drivers</td></tr>`;
                 renderRows(drivers);
@@ -602,6 +605,7 @@
             renderTable();
         };
 
+        // Modal Helpers
         window.toggleDetails = function(id) { document.getElementById(id).classList.toggle('hidden'); }
         window.openNotesModal = function(k) { document.getElementById('noteUnitDisplay').innerText=k; document.getElementById('noteKey').value=`${window.currentCompany}_${k}`; document.getElementById('noteInput').value=window.unitNotes[`${window.currentCompany}_${k}`]||""; document.getElementById('notesModal').classList.remove('hidden'); }
         window.closeNotesModal = function() { document.getElementById('notesModal').classList.add('hidden'); }
@@ -616,29 +620,7 @@
         window.closeEditModal = function() { document.getElementById('editModal').classList.add('hidden'); }
         window.saveUnitEdit = function() { const newUnit=document.getElementById('editUnitInput').value.trim(); const id=document.getElementById('editFileIndex').value; if(newUnit && id) { const item=window.appData.find(d=>d.id===id); if(item){ item.unit=newUnit; renderTable(); closeEditModal(); } } }
 
-        window.backupData = function() {
-            if(window.appData.length===0) return;
-            const blob = new Blob([JSON.stringify({ version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies },null,2)], {type: "application/json"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = `1099_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
-        }
-        
-        window.restoreData = function(input) {
-            const file = input.files[0]; if(!file) return;
-            const r = new FileReader();
-            r.onload = e => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    if(Array.isArray(json)) { window.appData=json; window.unitNotes={}; } 
-                    else { window.appData=json.appData||[]; window.unitNotes=json.unitNotes||{}; window.knownCompanies=json.knownCompanies||["Default Company"]; }
-                    window.currentCompany = window.appData.length ? (window.appData[window.appData.length-1].company || window.knownCompanies[0]) : window.knownCompanies[0];
-                    updateCompanyDropdown(); renderTable();
-                } catch(err) { alert("Invalid backup."); }
-            };
-            r.readAsText(file); input.value='';
-        }
-
+        // PDF Print
         window.printReport = function() {
             const tbody = document.getElementById('dataTableBody');
             if(tbody.innerText.includes("No data")) return;
@@ -680,6 +662,30 @@
             }
             doc.save("Report.pdf");
         };
+
+        // --- BACKUP/RESTORE ---
+        window.backupData = function() {
+            if(window.appData.length===0) return;
+            const blob = new Blob([JSON.stringify({ version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies },null,2)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `1099_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+        }
+        
+        window.restoreData = function(input) {
+            const file = input.files[0]; if(!file) return;
+            const r = new FileReader();
+            r.onload = e => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    if(Array.isArray(json)) { window.appData=json; window.unitNotes={}; } 
+                    else { window.appData=json.appData||[]; window.unitNotes=json.unitNotes||{}; window.knownCompanies=json.knownCompanies||["Default Company"]; }
+                    window.currentCompany = window.appData.length ? (window.appData[window.appData.length-1].company || window.knownCompanies[0]) : window.knownCompanies[0];
+                    updateCompanyDropdown(); renderTable();
+                } catch(err) { alert("Invalid backup."); }
+            };
+            r.readAsText(file); input.value='';
+        }
     </script>
 </body>
 </html>
