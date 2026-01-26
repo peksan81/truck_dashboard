@@ -4,7 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Tools Hub</title>
+    
+    <!-- Tailwind Configuration for Dark Mode -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <script type="module">
@@ -33,6 +41,13 @@
 
         // Main Function
         async function initDashboard() {
+            // Apply theme on load
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+                updateBulbIcon(true);
+            }
+
             const key = localStorage.getItem('my_access_key');
             
             // 1. Quick key check
@@ -95,11 +110,11 @@
             } catch (e) {
                 console.warn("Redirection blocked (preview mode). Showing fallback.");
                 document.body.innerHTML = `
-                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
-                        <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
+                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans dark:bg-gray-900 dark:text-white">
+                        <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg text-center max-w-md">
                             <i class="fas fa-lock text-4xl text-blue-600 mb-4"></i>
                             <h1 class="text-2xl font-bold mb-2">Authentication Required</h1>
-                            <p class="text-gray-600 mb-6">You need to log in to access this dashboard.</p>
+                            <p class="text-gray-600 dark:text-gray-400 mb-6">You need to log in to access this dashboard.</p>
                             <a href="index.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition inline-block">
                                 Go to Login Page
                             </a>
@@ -109,27 +124,90 @@
             }
         }
 
+        // --- THEME TOGGLE LOGIC ---
+        window.toggleTheme = function() {
+            const html = document.documentElement;
+            const bulb = document.getElementById('themeIcon');
+            
+            // Add animation class
+            bulb.classList.add('bulb-shake');
+            setTimeout(() => bulb.classList.remove('bulb-shake'), 500);
+
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                updateBulbIcon(false);
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                updateBulbIcon(true);
+            }
+        };
+
+        function updateBulbIcon(isDark) {
+            const bulb = document.getElementById('themeIcon');
+            if (isDark) {
+                // ON State (Dark Mode Active - Bulb GLOWS to provide light)
+                bulb.classList.remove('text-gray-400');
+                bulb.classList.add('text-yellow-400', 'bulb-on');
+            } else {
+                // OFF State (Light Mode Active - Bulb is OFF)
+                bulb.classList.remove('text-yellow-400', 'bulb-on');
+                bulb.classList.add('text-gray-400');
+            }
+        }
+
         initDashboard();
     </script>
+    
+    <style>
+        /* Lightbulb Animations */
+        .bulb-on {
+            text-shadow: 0 0 10px #facc15, 0 0 20px #facc15;
+            filter: drop-shadow(0 0 5px #facc15);
+        }
+        
+        @keyframes shake {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(15deg); }
+            50% { transform: rotate(-15deg); }
+            75% { transform: rotate(5deg); }
+            100% { transform: rotate(0deg); }
+        }
+        
+        .bulb-shake {
+            animation: shake 0.4s ease-in-out;
+        }
+        
+        /* Smooth background transitions */
+        body, .tool-card, nav {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+    </style>
 </head>
-<body class="flex flex-col min-h-screen text-gray-800 font-sans bg-gray-50">
+<body class="flex flex-col min-h-screen text-gray-800 bg-gray-50 font-sans dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300">
 
     <!-- Navbar -->
-    <nav class="bg-white shadow-sm p-4 sticky top-0 z-50">
+    <nav class="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-50 transition-colors duration-300">
         <div class="container mx-auto flex justify-between items-center">
-            <div class="font-bold text-xl text-gray-700 flex items-center">
+            <div class="font-bold text-xl text-gray-700 dark:text-white flex items-center">
                 <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
             </div>
             
             <div class="flex items-center gap-4">
+                <!-- Theme Toggle (Lightbulb) -->
+                <button onclick="toggleTheme()" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition focus:outline-none" title="Toggle Theme">
+                    <i id="themeIcon" class="fas fa-lightbulb text-2xl text-gray-400 transition-all duration-300"></i>
+                </button>
+
                 <!-- User Info -->
-                <div class="hidden md:flex items-center text-sm font-medium text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
+                <div class="hidden md:flex items-center text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-full border dark:border-gray-600">
                     <i class="fas fa-user-circle text-blue-500 mr-2 text-lg"></i>
                     <span id="userName">Loading...</span>
                 </div>
 
                 <!-- Logout Button -->
-                <button onclick="logout()" class="text-xs font-bold text-red-500 hover:text-white border border-red-200 hover:bg-red-500 px-4 py-2 rounded-lg transition shadow-sm flex items-center">
+                <button onclick="logout()" class="text-xs font-bold text-red-500 hover:text-white border border-red-200 dark:border-red-900 hover:bg-red-500 px-4 py-2 rounded-lg transition shadow-sm flex items-center">
                     <i class="fas fa-sign-out-alt mr-2"></i> Log Out
                 </button>
             </div>
@@ -140,50 +218,51 @@
     <main class="flex-grow container mx-auto px-4 py-12">
         
         <div class="text-center mb-12">
-            <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Welcome Back!</h1>
-            <p class="text-lg text-gray-600">All your tools in one place.</p>
+            <h1 class="text-4xl font-extrabold text-gray-800 dark:text-white mb-4">Welcome Back!</h1>
+            <p class="text-lg text-gray-600 dark:text-gray-400">All your tools in one place.</p>
         </div>
 
         <!-- Tool Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
             
             <!-- TOOL 1: 1099 Manager -->
-            <a href="1099.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-blue-500 transition hover:-translate-y-1 block relative">
+            <a href="1099.html" class="tool-card bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-blue-500 transition hover:-translate-y-1 block relative border border-transparent dark:border-gray-700">
                 <div class="bg-blue-600 p-6 flex justify-center items-center h-40">
                     <i class="fas fa-truck-moving text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
                 </div>
                 <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">1099 Manager</h3>
-                    <p class="text-gray-500 text-sm mb-4">Settlement calculation, PDF analysis, and driver reports.</p>
-                    <div class="flex items-center text-blue-600 font-bold text-sm uppercase tracking-wide">
+                    <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-2">1099 Manager</h3>
+                    <p class="text-gray-500 dark:text-gray-400 text-sm mb-4">Settlement calculation, PDF analysis, and driver reports.</p>
+                    <div class="flex items-center text-blue-600 dark:text-blue-400 font-bold text-sm uppercase tracking-wide">
                         Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
                     </div>
                 </div>
             </a>
             
             <!-- TOOL 2: Payroll -->
-            <a href="plate.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-green-500 transition hover:-translate-y-1 block relative">
+            <a href="plate.html" class="tool-card bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-green-500 transition hover:-translate-y-1 block relative border border-transparent dark:border-gray-700">
                 <div class="bg-green-600 p-6 flex justify-center items-center h-40">
                     <i class="fas fa-money-check-alt text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
                 </div>
                 <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">Payroll</h3>
-                    <p class="text-gray-500 text-sm mb-4">Calculator for salaries, bonuses, and employee deductions.</p>
-                    <div class="flex items-center text-green-600 font-bold text-sm uppercase tracking-wide">
+                    <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-2">Payroll</h3>
+                    <p class="text-gray-500 dark:text-gray-400 text-sm mb-4">Calculator for salaries, bonuses, and employee deductions.</p>
+                    <div class="flex items-center text-green-600 dark:text-green-400 font-bold text-sm uppercase tracking-wide">
                         Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
                     </div>
                 </div>
             </a>
             
             <!-- TOOL 3: Notes -->
-            <a href="#" onclick="alert('Coming soon!')" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative grayscale opacity-75 hover:grayscale-0 hover:opacity-100">
-                <div class="bg-yellow-500 p-6 flex justify-center items-center h-40">
-                    <i class="fas fa-sticky-note text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
+            <a href="#" onclick="alert('Coming soon!')" class="tool-card bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative border border-transparent dark:border-gray-700">
+                <!-- Grayscale removed to look active in dark mode, opacity kept for 'coming soon' feel -->
+                <div class="bg-yellow-500 p-6 flex justify-center items-center h-40 opacity-90">
+                    <i class="fas fa-sticky-note text-6xl text-white group-hover:scale-110 transition-transform duration-300"></i>
                 </div>
                 <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">Notes</h3>
-                    <p class="text-gray-500 text-sm mb-4">Quick reminders and important information.</p>
-                    <div class="flex items-center text-yellow-600 font-bold text-sm uppercase tracking-wide">
+                    <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-2">Notes</h3>
+                    <p class="text-gray-500 dark:text-gray-400 text-sm mb-4">Quick reminders and important information.</p>
+                    <div class="flex items-center text-yellow-600 dark:text-yellow-400 font-bold text-sm uppercase tracking-wide">
                         Coming soon...
                     </div>
                 </div>
@@ -192,7 +271,7 @@
         </div>
     </main>
     
-    <footer class="text-center text-gray-400 text-sm py-8 border-t border-gray-200 mt-auto">
+    <footer class="text-center text-gray-400 dark:text-gray-500 text-sm py-8 border-t border-gray-200 dark:border-gray-700 mt-auto">
         &copy; 2026 My Tools Hub. All rights reserved.
     </footer>
 </body>
