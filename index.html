@@ -3,19 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Tools Hub</title>
+    <title>Secure Access</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- FIREBASE SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // ==========================================
-        // 1. PODESAVANJA (POPUNI OVO !!!)
-        // ==========================================
-        
+        // PODESAVANJA
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -25,289 +21,119 @@
             appId: "1:594927367199:web:4f3c5af05f4cfdb482112a",
             measurementId: "G-42RMFB41Q2"
         };
-
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
-        
-        // ==========================================
 
         let app, auth, provider;
-        let currentUser = null; 
-
         try {
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             provider = new GoogleAuthProvider();
             setPersistence(auth, browserLocalPersistence);
-        } catch (e) {
-            console.error("Firebase config error", e);
-        }
+        } catch (e) { console.error(e); }
 
-        // --- GLOBALNE FUNKCIJE ---
-
+        // --- LOGIKA ---
         window.checkGateCode = async function() {
-            const input = document.getElementById('gateInput');
             const btn = document.getElementById('verifyBtn');
-            const key = input.value.trim();
-
+            const key = document.getElementById('gateInput').value.trim();
             if (!key) return;
 
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Verifying...';
-            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+
             try {
                 const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(key)}`);
                 const data = await response.json();
 
                 if (data.status === 'allowed') {
                     localStorage.setItem('my_access_key', key);
-                    
-                    if (currentUser) {
-                        registerUserInDb(key, currentUser.email);
-                        unlockDashboard(currentUser);
+                    // Ako je google vec spreman, idi dalje, inace prikazi google dugme
+                    if (auth.currentUser) {
+                        registerUserInDb(key, auth.currentUser.email);
+                        window.location.href = "dashboard.html";
                     } else {
-                        document.getElementById('gateStep').classList.add('hidden');
-                        document.getElementById('loginStep').classList.remove('hidden');
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step2').classList.remove('hidden');
                     }
-                } else if (data.status === 'banned') {
-                    alert("This access key has been BANNED.");
-                    localStorage.removeItem('my_access_key');
                 } else {
-                    alert("Invalid access key.");
-                    document.getElementById('gateInput').classList.add('border-red-500');
+                    alert("Access Denied: " + (data.message || "Invalid Key"));
                 }
             } catch (e) {
-                console.error(e);
-                alert("Connection error. Please try again.");
+                alert("Connection Error.");
             }
-
             btn.disabled = false;
-            btn.innerText = 'Verify Code';
+            btn.innerText = 'Verify';
         };
 
         window.loginWithGoogle = function() {
-            if (!auth) return;
-            signInWithPopup(auth, provider)
-                .then((result) => {
-                    // onAuthStateChanged ce odraditi ostalo
-                }).catch((error) => {
-                    alert("Login failed: " + error.message);
-                });
-        };
-
-        window.lockApp = function() {
-            localStorage.removeItem('my_access_key');
-            location.reload(); 
-        };
-
-        window.fullSignOut = function() {
-            if(auth) signOut(auth);
-            localStorage.removeItem('my_access_key');
-            location.reload();
+            signInWithPopup(auth, provider).then((result) => {
+                const key = localStorage.getItem('my_access_key');
+                registerUserInDb(key, result.user.email);
+                window.location.href = "dashboard.html";
+            }).catch(e => alert(e.message));
         };
 
         function registerUserInDb(key, email) {
-            if (!SHEET_API_URL) return;
-            fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, {
-                method: "POST",
-                mode: "no-cors"
-            });
+            fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, { method: "POST", mode: "no-cors" });
         }
 
-        function unlockDashboard(user) {
-            // Sakrij Loader i AuthWrapper, prikazi App
-            document.getElementById('initialLoader').classList.add('hidden');
-            document.getElementById('authWrapper').classList.add('hidden');
-            document.getElementById('mainApp').classList.remove('blur-content');
-            document.getElementById('userNameDisplay').innerText = user.displayName || user.email;
-        }
-
-        // --- GLAVNI LISTENER ---
+        // Auto-redirect ako je sve vec ok
         if(auth) {
-            onAuthStateChanged(auth, async (user) => {
-                currentUser = user;
-                const storedKey = localStorage.getItem('my_access_key');
-                const loader = document.getElementById('initialLoader');
-                const authWrapper = document.getElementById('authWrapper');
-
-                if (user && storedKey) {
-                    // Korisnik je verovatno OK, ali proveravamo bazu za svaki slucaj
-                    try {
-                        const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(storedKey)}`);
-                        const data = await response.json();
-                        
-                        if (data.status === 'allowed') {
-                            unlockDashboard(user);
-                        } else {
-                            alert("Your access has been revoked.");
-                            logoutUser();
-                        }
-                    } catch(e) {
-                        // Ako nema neta, a vec je ulogovan, pusti ga da radi (Offline mode)
-                        unlockDashboard(user); 
-                    }
+            onAuthStateChanged(auth, (user) => {
+                const key = localStorage.getItem('my_access_key');
+                if (user && key) {
+                    // Brza provera - odmah salji na dashboard
+                    // Dashboard ce sam proveriti validnost kljuca u pozadini
+                    window.location.href = "dashboard.html";
                 } else {
-                    // NIJE ULOGOVAN - Prikazi Auth UI
-                    loader.classList.add('hidden'); // Skloni loader
-                    authWrapper.classList.remove('hidden'); // Pokazi login
-                    document.getElementById('mainApp').classList.add('blur-content');
+                    document.getElementById('loader').classList.add('hidden');
+                    document.getElementById('loginBox').classList.remove('hidden');
                     
-                    if (!storedKey) {
-                        document.getElementById('gateStep').classList.remove('hidden');
-                        document.getElementById('loginStep').classList.add('hidden');
-                        
-                        if (user) {
-                            document.getElementById('googleStatus').innerHTML = `<span class="text-green-600 font-bold"><i class="fas fa-check-circle"></i> Logged in as ${user.email}</span>`;
-                        }
-                    } else {
-                        document.getElementById('gateStep').classList.add('hidden');
-                        document.getElementById('loginStep').classList.remove('hidden');
+                    if (key) {
+                         document.getElementById('step1').classList.add('hidden');
+                         document.getElementById('step2').classList.remove('hidden');
                     }
                 }
             });
         }
     </script>
-
-    <style>
-        body { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
-        .tool-card { transition: all 0.3s ease; }
-        .tool-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-        .blur-content { filter: blur(10px); pointer-events: none; user-select: none; }
-        .auth-box { animation: slideIn 0.5s ease-out; }
-        @keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        /* Loader Style */
-        #initialLoader { transition: opacity 0.3s ease-out; }
-    </style>
 </head>
-<body class="flex flex-col min-h-screen text-gray-800 font-sans relative">
+<body class="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
 
-    <!-- === INITIAL LOADER (SPRECAVA TREPERENJE) === -->
-    <div id="initialLoader" class="fixed inset-0 bg-gray-100 z-[60] flex flex-col items-center justify-center">
-        <i class="fas fa-circle-notch fa-spin text-4xl text-blue-600"></i>
-        <p class="mt-4 text-gray-500 font-medium">Loading...</p>
+    <!-- Loader -->
+    <div id="loader" class="text-white text-center">
+        <i class="fas fa-circle-notch fa-spin text-4xl mb-4"></i>
+        <p>Checking security...</p>
     </div>
 
-    <!-- === AUTHENTICATION OVERLAY (Hidden by default) === -->
-    <div id="authWrapper" class="fixed inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center p-4 transition-opacity duration-500 hidden">
+    <!-- Login Box -->
+    <div id="loginBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden">
         
-        <div class="auth-box bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center">
-            
-            <!-- STEP 1: GATEKEEPER CODE -->
-            <div id="gateStep">
-                <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-lock text-2xl text-gray-600"></i>
-                </div>
-                <h2 class="text-2xl font-bold text-gray-800 mb-2">Security Check</h2>
-                <p class="text-gray-500 text-sm mb-4">Enter your access key to unlock.</p>
-                
-                <div id="googleStatus" class="mb-4 text-sm"></div>
-
-                <form onsubmit="event.preventDefault(); checkGateCode();" class="space-y-4">
-                    <input type="password" id="gateInput" 
-                        class="w-full text-center text-xl tracking-widest border-2 border-gray-200 rounded-lg p-3 focus:border-blue-500 focus:outline-none transition" 
-                        placeholder="••••••••" autofocus>
-                    <button type="submit" id="verifyBtn"
-                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition shadow-lg">
-                        Unlock
-                    </button>
-                </form>
-                
-                <div class="mt-6 pt-4 border-t border-gray-100">
-                    <button onclick="fullSignOut()" class="text-xs text-red-400 hover:text-red-600">
-                        Not you? Sign out completely
-                    </button>
-                </div>
+        <!-- Step 1: Code -->
+        <div id="step1">
+            <div class="text-center mb-6">
+                <i class="fas fa-shield-alt text-4xl text-blue-600 mb-2"></i>
+                <h1 class="text-2xl font-bold text-gray-800">Secure Entry</h1>
+                <p class="text-gray-500 text-sm">Please enter access key</p>
             </div>
-
-            <!-- STEP 2: GOOGLE LOGIN -->
-            <div id="loginStep" class="hidden">
-                <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fab fa-google text-2xl text-blue-600"></i>
-                </div>
-                <h2 class="text-2xl font-bold text-gray-800 mb-2">One Last Step</h2>
-                <p class="text-gray-500 text-sm mb-6">Key accepted. Please verify identity.</p>
-                
-                <button onclick="loginWithGoogle()" 
-                    class="w-full border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-bold py-3 rounded-lg transition flex items-center justify-center gap-3 shadow-sm">
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5" alt="Google">
-                    Continue with Google
-                </button>
-            </div>
-
+            <form onsubmit="event.preventDefault(); checkGateCode();" class="space-y-4">
+                <input type="password" id="gateInput" class="w-full border-2 border-gray-200 rounded-lg p-3 text-center text-xl tracking-widest focus:border-blue-500 outline-none" placeholder="••••••••" autofocus>
+                <button type="submit" id="verifyBtn" class="w-full bg-gray-900 hover:bg-black text-white py-3 rounded-lg font-bold transition">Verify</button>
+            </form>
         </div>
+
+        <!-- Step 2: Google -->
+        <div id="step2" class="hidden text-center">
+             <div class="text-center mb-6">
+                <i class="fab fa-google text-4xl text-blue-600 mb-2"></i>
+                <h1 class="text-2xl font-bold text-gray-800">Verify Identity</h1>
+            </div>
+            <button onclick="loginWithGoogle()" class="w-full border border-gray-300 py-3 rounded-lg font-bold hover:bg-gray-50 flex items-center justify-center gap-2">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5"> Sign in with Google
+            </button>
+            <button onclick="localStorage.removeItem('my_access_key'); location.reload()" class="mt-4 text-xs text-gray-400 underline">Change Key</button>
+        </div>
+
     </div>
 
-    <!-- === MAIN APP === -->
-    <div id="mainApp" class="flex flex-col flex-grow blur-content">
-        
-        <!-- Navbar -->
-        <nav class="bg-white shadow-sm p-4">
-            <div class="container mx-auto flex justify-between items-center">
-                <div class="font-bold text-xl text-gray-700">
-                    <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
-                </div>
-                <div class="flex items-center gap-4">
-                    <div class="text-sm text-gray-500 flex items-center gap-2">
-                        <i class="fas fa-user-circle text-blue-500"></i> <span id="userNameDisplay">User</span>
-                    </div>
-                    <button onclick="lockApp()" class="text-xs font-bold text-gray-500 hover:text-blue-600 border border-gray-200 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-white transition shadow-sm">
-                        <i class="fas fa-lock mr-1"></i> Lock
-                    </button>
-                </div>
-            </div>
-        </nav>
-
-        <!-- Main Content -->
-        <main class="flex-grow container mx-auto px-4 py-12">
-            <div class="text-center mb-12">
-                <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Welcome Back!</h1>
-                <p class="text-lg text-gray-600">Secure Environment Active.</p>
-            </div>
-
-            <!-- Tool Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
-                <!-- TOOL 1 -->
-                <a href="1099.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-blue-500">
-                    <div class="bg-blue-600 p-6 flex justify-center items-center">
-                        <i class="fas fa-truck-moving text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
-                    </div>
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-800 mb-2">1099 Manager</h3>
-                        <p class="text-gray-500 text-sm">Settlement calculation & Reports.</p>
-                        <div class="mt-4 flex items-center text-blue-600 font-medium text-sm">
-                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
-                        </div>
-                    </div>
-                </a>
-                
-                <!-- TOOL 2 -->
-                <a href="plate.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-green-500 opacity-90 hover:opacity-100">
-                    <div class="bg-green-600 p-6 flex justify-center items-center">
-                        <i class="fas fa-money-check-alt text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
-                    </div>
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-800 mb-2">Payroll</h3>
-                        <p class="text-gray-500 text-sm">Calculators & Deductions.</p>
-                        <div class="mt-4 flex items-center text-green-600 font-medium text-sm">
-                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
-                        </div>
-                    </div>
-                </a>
-                
-                <!-- TOOL 3 -->
-                <a href="#" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500">
-                    <div class="bg-yellow-500 p-6 flex justify-center items-center">
-                        <i class="fas fa-sticky-note text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
-                    </div>
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-800 mb-2">Notes</h3>
-                        <p class="text-gray-500 text-sm">Quick reminders.</p>
-                        <div class="mt-4 flex items-center text-yellow-600 font-medium text-sm">
-                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
-                        </div>
-                    </div>
-                </a>
-            </div>
-        </main>
-    </div>
 </body>
 </html>
