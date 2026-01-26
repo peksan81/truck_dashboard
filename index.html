@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Tools Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- FIREBASE SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+        // ==========================================
+        // 1. PODESAVANJA (POPUNI OVO !!!)
+        // ==========================================
+        
+        // KOPIRAJ OVO SA FIREBASE KONZOLE:
+        const firebaseConfig = {
+            apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
+            authDomain: "truck-dashboard-18d7e.firebaseapp.com",
+            projectId: "truck-dashboard-18d7e",
+            storageBucket: "truck-dashboard-18d7e.firebasestorage.app",
+            messagingSenderId: "594927367199",
+            appId: "1:594927367199:web:4f3c5af05f4cfdb482112a",
+            measurementId: "G-42RMFB41Q2"
+        };
+
+        // ZALEPI OVDE SVOJ GOOGLE SHEET SCRIPT URL (/exec):
+        const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
+        
+        // ==========================================
+
+        let app, auth, provider;
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            provider = new GoogleAuthProvider();
+        } catch (e) {
+            console.error("Firebase config error", e);
+        }
+
+        // --- GLOBALNE FUNKCIJE ---
+
+        // 1. Provera Kljuca (Zove Google Sheet)
+        window.checkGateCode = async function() {
+            const input = document.getElementById('gateInput');
+            const btn = document.getElementById('verifyBtn');
+            const msg = document.getElementById('gateMsg');
+            const key = input.value.trim();
+
+            if (!key) return;
+
+            // UI Loading state
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking...';
+            msg.classList.add('hidden');
+
+            try {
+                // Pozivamo Google Script
+                const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(key)}`);
+                const data = await response.json();
+
+                if (data.status === 'allowed') {
+                    // Kljuc je dobar i aktivan
+                    localStorage.setItem('my_access_key', key);
+                    document.getElementById('gateStep').classList.add('hidden');
+                    document.getElementById('loginStep').classList.remove('hidden');
+                } else if (data.status === 'banned') {
+                    showError("This access key has been BANNED by admin.");
+                    localStorage.removeItem('my_access_key');
+                } else {
+                    showError("Invalid access key.");
+                }
+            } catch (e) {
+                console.error(e);
+                // Fallback za testiranje ako Sheet URL nije unet
+                if (SHEET_API_URL.includes("TVOJ_")) {
+                    alert("GRESKA: Nisi uneo SHEET_API_URL u kod! Vidi liniju 28.");
+                } else {
+                    showError("Connection error. Try again.");
+                }
+            }
+
+            // Reset UI
+            btn.disabled = false;
+            btn.innerText = 'Verify Code';
+        };
+
+        function showError(text) {
+            const msg = document.getElementById('gateMsg');
+            msg.innerText = text;
+            msg.classList.remove('hidden');
+            document.getElementById('gateInput').classList.add('border-red-500');
+        }
+
+        // 2. Google Login
+        window.loginWithGoogle = function() {
+            if (!auth) { alert("Firebase nije podesen! Vidi liniju 18."); return; }
+            signInWithPopup(auth, provider)
+                .then((result) => {
+                    const user = result.user;
+                    const key = localStorage.getItem('my_access_key');
+                    
+                    // Saljemo info u bazu (koji user koristi koji kljuc)
+                    registerUserInDb(key, user.email);
+                    
+                    unlockDashboard(user);
+                }).catch((error) => {
+                    alert("Login failed: " + error.message);
+                });
+        };
+
+        // 3. Registracija u Bazi (Povezivanje kljuca i emaila)
+        function registerUserInDb(key, email) {
+            if (!SHEET_API_URL || SHEET_API_URL.includes("TVOJ_")) return;
+            
+            // Koristimo 'no-cors' za fire-and-forget slanje
+            fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, {
+                method: "POST",
+                mode: "no-cors"
+            });
+        }
+
+        window.logoutUser = function() {
+            if(auth) signOut(auth);
+            localStorage.removeItem('my_access_key'); // Brisemo kljuc da mora ponovo da unese
+            location.reload();
+        };
+
+        function unlockDashboard(user) {
+            document.getElementById('authWrapper').classList.add('hidden');
+            document.getElementById('mainApp').classList.remove('blur-content');
+            document.getElementById('userNameDisplay').innerText = user.displayName || user.email;
+        }
+
+        // --- INICIJALIZACIJA PRI UCITAVANJU ---
+        if(auth) {
+            onAuthStateChanged(auth, async (user) => {
+                const storedKey = localStorage.getItem('my_access_key');
+
+                if (user && storedKey) {
+                    // Korisnik je ulogovan i ima kljuc. 
+                    // OBAVEZNO: Proveri da li je kljuc i dalje AKTIVAN (da nije banovan u medjuvremenu)
+                    try {
+                        const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(storedKey)}`);
+                        const data = await response.json();
+                        
+                        if (data.status === 'allowed') {
+                            unlockDashboard(user);
+                        } else {
+                            // Banovan u medjuvremenu
+                            alert("Your access has been revoked.");
+                            logoutUser();
+                        }
+                    } catch(e) {
+                        // Ako ne mozemo da proverimo (greska mreze), pusti ga (ili blokiraj, zavisi od strogosti)
+                        // Za sad pustamo da ne blokiramo rad ako net stucne
+                        unlockDashboard(user);
+                    }
+                } else {
+                    // Nije ulogovan
+                    document.getElementById('authWrapper').classList.remove('hidden');
+                    document.getElementById('mainApp').classList.add('blur-content');
+                    
+                    // Ako nema kljuc, pokazi Gate. Ako ima kljuc a nema user, pokazi Login.
+                    if (!storedKey) {
+                        document.getElementById('gateStep').classList.remove('hidden');
+                        document.getElementById('loginStep').classList.add('hidden');
+                    } else {
+                        document.getElementById('gateStep').classList.add('hidden');
+                        document.getElementById('loginStep').classList.remove('hidden');
+                    }
+                }
+            });
+        }
+    </script>
+
+    <style>
+        body { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
+        .tool-card { transition: all 0.3s ease; }
+        .tool-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
+        .blur-content { filter: blur(10px); pointer-events: none; user-select: none; }
+        .auth-box { animation: slideIn 0.5s ease-out; }
+        @keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen text-gray-800 font-sans relative">
+
+    <!-- === AUTHENTICATION OVERLAY === -->
+    <div id="authWrapper" class="fixed inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center p-4 transition-opacity duration-500">
+        
+        <div class="auth-box bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center">
+            
+            <!-- STEP 1: GATEKEEPER CODE (Baza Provera) -->
+            <div id="gateStep">
+                <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-key text-2xl text-gray-600"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">Access Required</h2>
+                <p class="text-gray-500 text-sm mb-6">Enter your unique access key.</p>
+                
+                <form onsubmit="event.preventDefault(); checkGateCode();" class="space-y-4">
+                    <input type="password" id="gateInput" 
+                        class="w-full text-center text-xl tracking-widest border-2 border-gray-200 rounded-lg p-3 focus:border-blue-500 focus:outline-none transition" 
+                        placeholder="••••••••" autofocus>
+                    <p id="gateMsg" class="text-red-500 text-xs hidden font-bold"></p>
+                    <button type="submit" id="verifyBtn"
+                        class="w-full bg-gray-800 hover:bg-black text-white font-bold py-3 rounded-lg transition">
+                        Verify Code
+                    </button>
+                </form>
+            </div>
+
+            <!-- STEP 2: GOOGLE LOGIN -->
+            <div id="loginStep" class="hidden">
+                <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fab fa-google text-2xl text-blue-600"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">Identify Yourself</h2>
+                <p class="text-gray-500 text-sm mb-6">Key verified. Please sign in with Google to link your session.</p>
+                
+                <button onclick="loginWithGoogle()" 
+                    class="w-full border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-bold py-3 rounded-lg transition flex items-center justify-center gap-3 shadow-sm">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5" alt="Google">
+                    Sign in with Google
+                </button>
+                
+                <button onclick="localStorage.removeItem('my_access_key'); location.reload()" class="mt-4 text-xs text-gray-400 hover:text-gray-600 underline">
+                    Enter different key
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- === MAIN APP === -->
+    <div id="mainApp" class="flex flex-col flex-grow blur-content">
+        
+        <!-- Navbar -->
+        <nav class="bg-white shadow-sm p-4">
+            <div class="container mx-auto flex justify-between items-center">
+                <div class="font-bold text-xl text-gray-700">
+                    <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-sm text-gray-500 flex items-center gap-2">
+                        <i class="fas fa-user-circle"></i> <span id="userNameDisplay">User</span>
+                    </div>
+                    <button onclick="logoutUser()" class="text-xs text-red-500 hover:text-red-700 font-medium border border-red-100 px-3 py-1 rounded bg-red-50">
+                        Sign Out
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="flex-grow container mx-auto px-4 py-12">
+            <div class="text-center mb-12">
+                <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Welcome Back!</h1>
+                <p class="text-lg text-gray-600">Secure Environment Active.</p>
+            </div>
+
+            <!-- Tool Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                <!-- TOOL 1 -->
+                <a href="1099.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-blue-500">
+                    <div class="bg-blue-600 p-6 flex justify-center items-center">
+                        <i class="fas fa-truck-moving text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
+                    </div>
+                    <div class="p-6">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">1099 Manager</h3>
+                        <p class="text-gray-500 text-sm">Settlement calculation & Reports.</p>
+                        <div class="mt-4 flex items-center text-blue-600 font-medium text-sm">
+                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
+                        </div>
+                    </div>
+                </a>
+                <!-- TOOL 2 -->
+                <a href="plate.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-green-500 opacity-90 hover:opacity-100">
+                    <div class="bg-green-600 p-6 flex justify-center items-center">
+                        <i class="fas fa-money-check-alt text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
+                    </div>
+                    <div class="p-6">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Payroll</h3>
+                        <p class="text-gray-500 text-sm">Calculators & Deductions.</p>
+                        <div class="mt-4 flex items-center text-green-600 font-medium text-sm">
+                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
+                        </div>
+                    </div>
+                </a>
+                <!-- TOOL 3 -->
+                <a href="#" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500">
+                    <div class="bg-yellow-500 p-6 flex justify-center items-center">
+                        <i class="fas fa-sticky-note text-5xl text-white group-hover:scale-110 transition-transform duration-300"></i>
+                    </div>
+                    <div class="p-6">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Notes</h3>
+                        <p class="text-gray-500 text-sm">Quick reminders.</p>
+                        <div class="mt-4 flex items-center text-yellow-600 font-medium text-sm">
+                            Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1099 Manager</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- PDF.js for reading PDFs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
+    <!-- jsPDF for generating reports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        .drop-zone {
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            background-color: #e0f2fe; /* light blue */
+            border-color: #0284c7; /* darker blue */
+            transform: scale(1.02);
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        /* Animation for detail rows */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="text-gray-800" onload="initApp()">
+
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800"><i class="fas fa-file-invoice-dollar text-blue-600 mr-2"></i> 1099 Manager</h1>
+                    <p class="text-gray-500 text-sm mt-1">Manage multiple companies and aggregate yearly totals for 1099.</p>
+                </div>
+                
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="document.getElementById('restoreInput').click()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition text-sm font-medium">
+                        <i class="fas fa-upload mr-2"></i> Restore
+                    </button>
+                    <input type="file" id="restoreInput" class="hidden" accept=".json" onchange="restoreData(this)">
+                    
+                    <button onclick="backupData()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition text-sm font-medium">
+                        <i class="fas fa-download mr-2"></i> Backup
+                    </button>
+                </div>
+            </div>
+
+            <hr class="border-gray-100 mb-4">
+
+            <!-- Company Selector Area -->
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div class="flex-1 w-full">
+                    <label class="block text-xs font-bold text-blue-800 uppercase mb-1">Active Company</label>
+                    <div class="flex gap-2">
+                        <div class="relative flex-1">
+                            <select id="companySelect" onchange="switchCompany(this.value)" 
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 appearance-none focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-700 bg-white cursor-pointer">
+                                <!-- Options populated by JS -->
+                            </select>
+                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                                <i class="fas fa-chevron-down text-xs"></i>
+                            </div>
+                        </div>
+                        
+                        <button onclick="openNewCompanyModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition shadow-sm whitespace-nowrap" title="Add New Company">
+                            <i class="fas fa-plus mr-1"></i> New
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border shadow-sm">
+                    <span class="text-sm font-bold text-gray-600">View Mode:</span>
+                    <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                        <button id="btnViewCurrent" onclick="switchView('current')" class="px-3 py-1 rounded-md text-sm font-medium transition bg-white text-blue-600 shadow-sm">
+                            Current Company
+                        </button>
+                        <button id="btnViewGlobal" onclick="switchView('global')" class="px-3 py-1 rounded-md text-sm font-medium text-gray-500 hover:text-gray-700 transition">
+                            Global (All)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- LEFT: Upload Zone (Disabled in Global Mode) -->
+            <div class="lg:col-span-1 transition-opacity duration-300" id="uploadSection">
+                <div class="bg-white rounded-lg shadow-md p-6 h-full flex flex-col relative">
+                    <h2 class="font-bold text-lg mb-4 text-gray-700">1. Upload Files</h2>
+                    <p class="text-xs text-gray-500 mb-2">Files will be added to: <span id="uploadTargetCompany" class="font-bold text-blue-600">Default Company</span></p>
+                    
+                    <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl flex-1 flex flex-col justify-center items-center p-8 text-center cursor-pointer min-h-[200px]" onclick="document.getElementById('fileInput').click()">
+                        <div class="bg-blue-50 p-4 rounded-full mb-3">
+                            <i class="fas fa-file-pdf text-blue-500 text-2xl"></i>
+                        </div>
+                        <p class="font-medium text-gray-700">Click to upload</p>
+                        <p class="text-sm text-gray-400 mt-1">or drag & drop PDFs here</p>
+                        <input type="file" id="fileInput" class="hidden" accept="application/pdf" multiple onchange="handleFiles(this.files)">
+                    </div>
+
+                    <!-- Global Mode Overlay (Blocks upload) -->
+                    <div id="globalOverlay" class="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 hidden flex flex-col items-center justify-center rounded-lg text-center p-6">
+                        <i class="fas fa-lock text-gray-400 text-3xl mb-2"></i>
+                        <p class="font-bold text-gray-600">Upload Disabled</p>
+                        <p class="text-sm text-gray-500">Switch to "Current Company" view to add files.</p>
+                    </div>
+
+                    <div id="processingStatus" class="mt-4 hidden">
+                        <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
+                            <span>Processing...</span>
+                            <span id="progressText">0%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5">
+                            <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Results Table -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow-md p-6 min-h-[500px]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="font-bold text-lg text-gray-700" id="reportTitle">Current Company Report</h2>
+                        
+                        <div class="flex gap-2">
+                            <button onclick="openClearModal()" class="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition text-sm border border-transparent hover:border-red-100">
+                                <i class="fas fa-trash-alt mr-1"></i> Clear
+                            </button>
+                            <button onclick="printReport()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition text-sm font-medium shadow-sm">
+                                <i class="fas fa-print mr-2"></i> Print PDF
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Aggregated Table -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 uppercase text-xs tracking-wider">
+                                    <th class="p-3 font-semibold w-1/4">Unit #</th>
+                                    <th class="p-3 font-semibold w-1/4">Driver / Note</th>
+                                    <th class="p-3 font-semibold text-right w-1/4">AFTER COMMISSION</th>
+                                    <th class="p-3 font-semibold text-center w-1/4">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dataTableBody" class="text-sm text-gray-700 divide-y divide-gray-100">
+                                <!-- Data rows go here -->
+                                <tr>
+                                    <td colspan="4" class="p-8 text-center text-gray-400">
+                                        No data yet. Upload PDF files to begin.
+                                    </td>
+                                </tr>
+                            </tbody>
+                            <tfoot id="tableFooter" class="hidden">
+                                <tr class="bg-blue-50 font-bold text-gray-800 border-t-2 border-blue-100">
+                                    <td class="p-3">TOTAL</td>
+                                    <td class="p-3"></td>
+                                    <td class="p-3 text-right" id="grandTotal">$0.00</td>
+                                    <td class="p-3"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- Add Company Modal -->
+    <div id="newCompanyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4">Add New Company</h3>
+            <input type="text" id="newCompanyName" class="w-full border rounded-lg p-3 mb-4 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter Company Name...">
+            <div class="flex justify-end gap-2">
+                <button onclick="closeNewCompanyModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="confirmNewCompany()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add & Switch</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Unit Modal -->
+    <div id="editModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4">Edit Unit Number</h3>
+            <p class="text-sm text-gray-500 mb-2">Changing the Unit # will merge this file with existing data for that unit.</p>
+            <input type="text" id="editUnitInput" class="w-full border rounded-lg p-2 mb-4 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter new Unit #">
+            <input type="hidden" id="editFileIndex">
+            <div class="flex justify-end gap-2">
+                <button onclick="closeEditModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="saveUnitEdit()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Notes Modal -->
+    <div id="notesModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4 flex items-center"><i class="fas fa-sticky-note text-yellow-500 mr-2"></i> Notes for Unit <span id="noteUnitDisplay"></span></h3>
+            <textarea id="noteInput" class="w-full border rounded-lg p-3 mb-4 h-32 focus:ring-2 focus:ring-blue-500 outline-none resize-none" placeholder="Enter notes here..."></textarea>
+            <input type="hidden" id="noteKey">
+            <div class="flex justify-end gap-2">
+                <button onclick="closeNotesModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="saveNote()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Note</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete File Confirmation Modal -->
+    <div id="deleteFileModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4 text-red-600">Delete File?</h3>
+            <p class="text-sm text-gray-600 mb-6">Are you sure you want to remove this file from the list?</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeDeleteFileModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="confirmDeleteFile()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Yes, Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clear Confirmation Modal -->
+    <div id="clearModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4 text-red-600">Clear Data?</h3>
+            <p class="text-sm text-gray-600 mb-6">Are you sure you want to delete data? <br><br><b>Note:</b> In "Global View", this clears EVERYTHING. In "Current View", this clears only the active company.</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeClearModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="confirmClear()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Yes, Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Restore Confirmation Modal -->
+    <div id="restoreModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-96 shadow-xl">
+            <h3 class="text-lg font-bold mb-4 text-blue-600">Restore Backup?</h3>
+            <p class="text-sm text-gray-600 mb-6">This will replace all current data with the data from the backup file.</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeRestoreModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                <button onclick="confirmRestore()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Yes, Restore</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logic Script -->
+    <script>
+        // Store Application State
+        let appData = []; 
+        let unitNotes = {}; // Key: "Company_Unit", Value: "Note text"
+        let restoreCandidate = null;
+        let viewMode = 'current'; // 'current' or 'global'
+        let fileToDeleteId = null;
+        
+        // --- Company Management State ---
+        let knownCompanies = ["Default Company"];
+        let currentCompany = "Default Company";
+
+        function initApp() {
+            updateCompanyDropdown();
+            renderTable();
+        }
+
+        // --- Company Logic ---
+
+        function updateCompanyDropdown() {
+            const select = document.getElementById('companySelect');
+            select.innerHTML = '';
+            
+            knownCompanies.forEach(comp => {
+                const option = document.createElement('option');
+                option.value = comp;
+                option.text = comp;
+                if(comp === currentCompany) option.selected = true;
+                select.appendChild(option);
+            });
+            
+            document.getElementById('uploadTargetCompany').innerText = currentCompany;
+        }
+
+        function switchCompany(newCompany) {
+            currentCompany = newCompany;
+            updateCompanyDropdown(); // to ensure UI sync
+            renderTable();
+        }
+
+        // --- Add New Company Modal ---
+        function openNewCompanyModal() {
+            document.getElementById('newCompanyName').value = '';
+            document.getElementById('newCompanyModal').classList.remove('hidden');
+            document.getElementById('newCompanyName').focus();
+        }
+
+        function closeNewCompanyModal() {
+            document.getElementById('newCompanyModal').classList.add('hidden');
+        }
+
+        function confirmNewCompany() {
+            const name = document.getElementById('newCompanyName').value.trim();
+            if(name) {
+                if(!knownCompanies.includes(name)) {
+                    knownCompanies.push(name);
+                }
+                currentCompany = name;
+                updateCompanyDropdown();
+                renderTable();
+                closeNewCompanyModal();
+            }
+        }
+
+        // --- View Logic ---
+
+        function switchView(mode) {
+            viewMode = mode;
+            const btnCurrent = document.getElementById('btnViewCurrent');
+            const btnGlobal = document.getElementById('btnViewGlobal');
+            const overlay = document.getElementById('globalOverlay');
+            const title = document.getElementById('reportTitle');
+
+            if (mode === 'current') {
+                btnCurrent.classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+                btnCurrent.classList.remove('text-gray-500', 'hover:text-gray-700');
+                
+                btnGlobal.classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                btnGlobal.classList.add('text-gray-500', 'hover:text-gray-700');
+
+                overlay.classList.add('hidden');
+                title.innerText = `${currentCompany} Report`;
+            } else {
+                btnGlobal.classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+                btnGlobal.classList.remove('text-gray-500', 'hover:text-gray-700');
+                
+                btnCurrent.classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                btnCurrent.classList.add('text-gray-500', 'hover:text-gray-700');
+
+                overlay.classList.remove('hidden');
+                title.innerText = "Global / Yearly Report (All Companies)";
+            }
+
+            renderTable();
+        }
+
+        // --- Drag & Drop Setup ---
+        const dropZone = document.getElementById('dropZone');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        // --- File Processing Logic ---
+        
+        async function handleFiles(files) {
+            if (viewMode === 'global') {
+                alert("Please switch to 'Current Company' view to upload files.");
+                return;
+            }
+
+            const fileArray = [...files];
+            const pdfs = fileArray.filter(f => f.type === 'application/pdf');
+            
+            if(pdfs.length === 0) return;
+
+            document.getElementById('processingStatus').classList.remove('hidden');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            for (let i = 0; i < pdfs.length; i++) {
+                const file = pdfs[i];
+                
+                // Check dupes (Check Filename AND Company)
+                const exists = appData.some(d => d.filename === file.name && d.company === currentCompany);
+                if(exists) continue;
+
+                try {
+                    const data = await extractDataFromPDF(file);
+                    // Add Metadata
+                    data.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                    data.company = currentCompany;
+                    
+                    appData.push(data);
+                } catch (err) {
+                    console.error("Error parsing " + file.name, err);
+                }
+
+                const percent = Math.round(((i + 1) / pdfs.length) * 100);
+                progressBar.style.width = percent + "%";
+                progressText.innerText = percent + "%";
+            }
+
+            setTimeout(() => {
+                document.getElementById('processingStatus').classList.add('hidden');
+                progressBar.style.width = "0%";
+            }, 1000);
+
+            renderTable();
+        }
+
+        // --- PDF PARSING CORE (GEOMETRIC/SPATIAL APPROACH) ---
+        async function extractDataFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const textContent = await page.getTextContent();
+            
+            // --- CRITICAL FILTER: IGNORE LEFT SIDE ---
+            const rightSideBoundary = viewport.width * 0.4;
+            const rightSideItems = textContent.items.filter(item => item.transform[4] > rightSideBoundary);
+            rightSideItems.sort((a, b) => b.transform[5] - a.transform[5]);
+
+            let lines = [];
+            let currentLine = [];
+            let lastY = -1;
+
+            rightSideItems.forEach(item => {
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) {
+                    currentLine.push(item);
+                } else {
+                    currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                    lines.push(currentLine);
+                    currentLine = [item];
+                }
+                lastY = item.transform[5];
+            });
+            if (currentLine.length > 0) {
+                currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                lines.push(currentLine);
+            }
+
+            let textLines = lines.map(line => {
+                return {
+                    text: line.map(item => item.str).join(' ').trim(), 
+                    y: line[0].transform[5],
+                    items: line
+                };
+            });
+
+            // --- EXTRACTION VARIABLES ---
+            let unit = "Unknown";
+            let name = "Unknown";
+            let amount = 0.0;
+
+            // 2. EXTRACT UNIT 
+            for (let i = 0; i < textLines.length; i++) {
+                const txt = textLines[i].text;
+                const match = txt.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
+                if (match) {
+                    let candidate = match[1].trim();
+                    candidate = candidate.split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim();
+                    if(candidate.length > 0) {
+                        unit = candidate;
+                        break; 
+                    }
+                }
+            }
+
+            // 3. EXTRACT NAME 
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
+                    const txt = textLines[i].text.toLowerCase();
+                    if (/\b(unit|truck)\b/i.test(txt)) {
+                        for (let j = 1; j <= 3; j++) {
+                            if (i + j < textLines.length) {
+                                const nextTxt = textLines[i+j].text;
+                                const parenMatch = nextTxt.match(/^\((.+?)\)$/);
+                                if (parenMatch) {
+                                    name = parenMatch[1].trim();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (name !== "Unknown") break;
+                }
+            }
+
+            let isCompanyDriver = false;
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
+                    const txt = textLines[i].text.toUpperCase();
+                    if (txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
+                        if (i + 1 < textLines.length) {
+                            const nextTxt = textLines[i+1].text;
+                            const isDate = /\d/.test(nextTxt) && (nextTxt.includes('-') || nextTxt.includes('/'));
+                            const isUnit = /truck|unit|#/i.test(nextTxt);
+                            
+                            if (!isDate && !isUnit && nextTxt.length > 2) {
+                                name = nextTxt;
+                                isCompanyDriver = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isCompanyDriver) {
+                unit = "";
+            }
+
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
+                    const match = textLines[i].text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
+                    if (match) {
+                        name = match[1].trim();
+                        break;
+                    }
+                }
+            }
+
+            // 4. EXTRACT TOTAL
+            const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
+            let fullLines = [];
+            currentLine = [];
+            lastY = -1;
+            fullItems.forEach(item => {
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) {
+                    currentLine.push(item);
+                } else {
+                    currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                    fullLines.push(currentLine.map(i=>i.str).join(' '));
+                    currentLine = [item];
+                }
+                lastY = item.transform[5];
+            });
+            if(currentLine.length) fullLines.push(currentLine.map(i=>i.str).join(' '));
+
+            if (isCompanyDriver) {
+                let checkTotalFound = false;
+                for(let line of fullLines) {
+                    const lower = line.toLowerCase();
+                    if(lower.includes('check total') || lower.includes('net pay') || lower.includes('check amount')) {
+                        const moneyMatch = line.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                        if (moneyMatch) {
+                            amount = parseFloat(moneyMatch[1].replace(',', ''));
+                            checkTotalFound = true;
+                        }
+                    }
+                }
+                
+                if (!checkTotalFound) {
+                     for(let i = fullLines.length - 1; i >= 0; i--) {
+                         if(fullLines[i].toLowerCase().includes('total')) {
+                             const moneyMatch = fullLines[i].match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                             if (moneyMatch) {
+                                 amount = parseFloat(moneyMatch[1].replace(',', ''));
+                                 break;
+                             }
+                         }
+                     }
+                }
+
+            } else {
+                let tripFound = false;
+                for(let line of fullLines) {
+                    const lower = line.toLowerCase();
+                    if(lower.includes('trip')) tripFound = true;
+                    if(tripFound && lower.includes('total')) {
+                        const moneyMatch = line.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                        if (moneyMatch) {
+                            amount = parseFloat(moneyMatch[1].replace(',', ''));
+                            break;
+                        }
+                    }
+                }
+                if (amount === 0) {
+                    for(let line of fullLines) {
+                        if(line.toLowerCase().includes('total')) {
+                            const moneyMatch = line.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                            if (moneyMatch) {
+                                amount = parseFloat(moneyMatch[1].replace(',', ''));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return {
+                unit: unit,
+                name: name,
+                amount: amount,
+                filename: file.name
+            };
+        }
+
+        // --- RATE HELPER ---
+        function getCommissionLabel(unitStr) {
+            if (!unitStr) return ""; // Drivers don't have rate label
+            if (unitStr.includes("287") || unitStr.includes("3781")) {
+                return "(10%)";
+            }
+            return "(12%)";
+        }
+
+        // --- Aggregation & Rendering ---
+
+        function renderTable() {
+            const tbody = document.getElementById('dataTableBody');
+            const footer = document.getElementById('tableFooter');
+            const grandTotalEl = document.getElementById('grandTotal');
+            
+            // 1. FILTER DATA
+            let filteredData = [];
+
+            if (viewMode === 'current') {
+                filteredData = appData.filter(item => item.company === currentCompany);
+            } else {
+                filteredData = appData; 
+            }
+
+            if(filteredData.length === 0) {
+                const msg = viewMode === 'current' 
+                    ? `No data for <b>${currentCompany}</b>. Upload files or switch companies.` 
+                    : `No data uploaded yet.`;
+                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400">${msg}</td></tr>`;
+                footer.classList.add('hidden');
+                return;
+            }
+
+            footer.classList.remove('hidden');
+
+            // 2. AGGREGATE
+            const aggregated = {};
+
+            filteredData.forEach(item => {
+                let key = "";
+                if (item.unit && item.unit !== "Unknown") {
+                    key = item.unit.toUpperCase();
+                } else {
+                    key = item.name.toUpperCase();
+                }
+                
+                if(!aggregated[key]) {
+                    aggregated[key] = { 
+                        unit: item.unit, 
+                        name: item.name, 
+                        totalAmount: 0, 
+                        files: [] 
+                    };
+                }
+                
+                aggregated[key].totalAmount += item.amount;
+                aggregated[key].files.push(item);
+                
+                if (aggregated[key].name === "Unknown" && item.name !== "Unknown") {
+                    aggregated[key].name = item.name;
+                }
+            });
+
+            // Split into Owners and Drivers
+            const owners = [];
+            const drivers = [];
+
+            Object.values(aggregated).forEach(item => {
+                if (item.unit && item.unit !== "") {
+                    owners.push(item);
+                } else {
+                    drivers.push(item);
+                }
+            });
+
+            // Sort logic
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) {
+                    const numA = parseInt(a.unit.replace(/\D/g,''));
+                    const numB = parseInt(b.unit.replace(/\D/g,''));
+                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                }
+                return (a.name || "").localeCompare(b.name || "");
+            };
+
+            owners.sort(sortFn);
+            drivers.sort(sortFn);
+
+            // 3. BUILD HTML
+            let html = '';
+            let totalSum = 0;
+
+            // Render Function
+            const renderRows = (list) => {
+                list.forEach(group => {
+                    totalSum += group.totalAmount;
+                    const safeKey = group.unit ? group.unit.replace(/[^a-zA-Z0-9]/g, '_') : group.name.replace(/[^a-zA-Z0-9]/g, '_'); 
+
+                    // Resolve Note
+                    const noteKey = `${currentCompany}_${group.unit || group.name}`;
+                    const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
+                    const noteColor = hasNote ? "text-yellow-500 hover:text-yellow-600" : "text-gray-300 hover:text-gray-500";
+                    const noteIcon = hasNote ? "fas fa-sticky-note" : "far fa-sticky-note";
+                    
+                    const displayUnit = group.unit || "";
+                    
+                    // Determine Rate Label (Only for owners)
+                    const rateLabel = group.unit ? getCommissionLabel(group.unit) : "";
+
+                    html += `
+                        <tr class="bg-white border-b hover:bg-gray-50 transition group">
+                            <td class="p-3 font-bold text-gray-800 flex items-center gap-2">
+                                ${displayUnit}
+                            </td>
+                            <td class="p-3 text-gray-600 flex items-center justify-between">
+                                <span>${group.name}</span>
+                                ${viewMode === 'current' ? `
+                                <button onclick="openNotesModal('${group.unit || group.name}')" class="${noteColor} transition" title="Add/View Notes">
+                                    <i class="${noteIcon} text-lg"></i>
+                                </button>` : ''}
+                            </td>
+                            <td class="p-3 text-right font-mono font-medium text-blue-700 text-lg">
+                                $${group.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} 
+                                <span class="text-xs text-gray-400 ml-1">${rateLabel}</span>
+                            </td>
+                            <td class="p-3 text-center">
+                                <button onclick="toggleDetails('details-${safeKey}')" class="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100 transition focus:outline-none">
+                                    ${viewMode === 'global' ? 'Breakdown' : group.files.length + ' Files'} <i class="fas fa-chevron-down ml-1"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+
+                    // Sub-content
+                    let detailsContent = '';
+                    if (viewMode === 'global') {
+                        const companyMap = {};
+                        group.files.forEach(f => {
+                            if(!companyMap[f.company]) companyMap[f.company] = 0;
+                            companyMap[f.company] += f.amount;
+                        });
+                        detailsContent = Object.keys(companyMap).map(comp => `
+                            <li class="flex justify-between items-center text-sm bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                <span class="font-bold text-gray-600"><i class="fas fa-building mr-2 text-blue-300"></i> ${comp}</span>
+                                <span class="font-mono text-gray-800">$${companyMap[comp].toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                            </li>
+                        `).join('');
+                    } else {
+                        detailsContent = group.files.map(f => `
+                            <li class="flex justify-between items-center text-sm bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                <div class="flex items-center gap-3">
+                                    <i class="far fa-file-pdf text-red-400"></i>
+                                    <span class="text-gray-600 truncate max-w-[150px]" title="${f.filename}">${f.filename}</span>
+                                    <div class="flex gap-1">
+                                        <button onclick="openEditModal('${f.id}', '${f.unit}')" class="text-gray-300 hover:text-blue-500 transition px-1" title="Edit Unit #">
+                                            <i class="fas fa-pencil-alt text-xs"></i>
+                                        </button>
+                                        <button onclick="deleteFile('${f.id}')" class="text-gray-300 hover:text-red-500 transition px-1" title="Delete File">
+                                            <i class="fas fa-trash-alt text-xs"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <span class="font-mono text-gray-800">$${f.amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                            </li>
+                        `).join('');
+                    }
+
+                    html += `
+                        <tr id="details-${safeKey}" class="hidden bg-gray-50/50">
+                            <td colspan="4" class="p-0">
+                                <div class="p-4 pl-12 border-l-4 border-blue-200">
+                                    <ul class="space-y-2">
+                                        ${detailsContent}
+                                    </ul>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            };
+
+            // Render Owners
+            if (owners.length > 0) {
+                // html += `<tr class="bg-gray-100 font-bold text-gray-700"><td colspan="4" class="p-2 pl-4">OWNER OPERATORS</td></tr>`;
+                renderRows(owners);
+            }
+
+            // Render Drivers
+            if (drivers.length > 0) {
+                html += `<tr class="bg-gray-200 font-bold text-gray-800 uppercase tracking-wider"><td colspan="4" class="p-3 pl-4 border-t-2 border-gray-300">DRIVERS</td></tr>`;
+                renderRows(drivers);
+            }
+
+            tbody.innerHTML = html;
+            grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
+        // --- Interaction Helpers --- (Same as before)
+        function toggleDetails(rowId) {
+            const el = document.getElementById(rowId);
+            if(el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                el.classList.add('fade-in');
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+        function deleteFile(id) {
+            fileToDeleteId = id;
+            document.getElementById('deleteFileModal').classList.remove('hidden');
+        }
+        function closeDeleteFileModal() {
+            document.getElementById('deleteFileModal').classList.add('hidden');
+            fileToDeleteId = null;
+        }
+        function confirmDeleteFile() {
+            if (fileToDeleteId) {
+                appData = appData.filter(d => d.id !== fileToDeleteId);
+                renderTable();
+                closeDeleteFileModal();
+            }
+        }
+        let currentEditId = null;
+        function openEditModal(fileId, currentUnit) {
+            currentEditId = fileId;
+            const input = document.getElementById('editUnitInput');
+            input.value = currentUnit;
+            document.getElementById('editModal').classList.remove('hidden');
+            input.focus();
+        }
+        function closeEditModal() {
+            document.getElementById('editModal').classList.add('hidden');
+            currentEditId = null;
+        }
+        function saveUnitEdit() {
+            const newUnit = document.getElementById('editUnitInput').value.trim();
+            if(!newUnit) return;
+            const item = appData.find(d => d.id === currentEditId);
+            if(item) {
+                item.unit = newUnit;
+                renderTable();
+                closeEditModal();
+            }
+        }
+        function openNotesModal(unitKey) {
+            const key = `${currentCompany}_${unitKey}`;
+            document.getElementById('noteUnitDisplay').innerText = unitKey;
+            document.getElementById('noteKey').value = key;
+            document.getElementById('noteInput').value = unitNotes[key] || "";
+            document.getElementById('notesModal').classList.remove('hidden');
+            document.getElementById('noteInput').focus();
+        }
+        function closeNotesModal() {
+            document.getElementById('notesModal').classList.add('hidden');
+        }
+        function saveNote() {
+            const key = document.getElementById('noteKey').value;
+            const val = document.getElementById('noteInput').value;
+            unitNotes[key] = val;
+            renderTable();
+            closeNotesModal();
+        }
+        function openClearModal() {
+            document.getElementById('clearModal').classList.remove('hidden');
+        }
+        function closeClearModal() {
+            document.getElementById('clearModal').classList.add('hidden');
+        }
+        function confirmClear() {
+            if (viewMode === 'global') {
+                appData = [];
+                unitNotes = {};
+                knownCompanies = ["Default Company"];
+                currentCompany = "Default Company";
+            } else {
+                appData = appData.filter(item => item.company !== currentCompany);
+            }
+            renderTable();
+            closeClearModal();
+        }
+        function backupData() {
+            if(appData.length === 0) return;
+            const backupPayload = {
+                version: 2,
+                appData: appData,
+                unitNotes: unitNotes,
+                knownCompanies: knownCompanies
+            };
+            const dataStr = JSON.stringify(backupPayload, null, 2);
+            const blob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            // Generate filename with date and time (YYYY-MM-DD_HH-MM-SS)
+            const now = new Date();
+            const dateStr = now.getFullYear() + '-' + 
+                           String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                           String(now.getDate()).padStart(2, '0') + '_' + 
+                           String(now.getHours()).padStart(2, '0') + '-' + 
+                           String(now.getMinutes()).padStart(2, '0') + '-' + 
+                           String(now.getSeconds()).padStart(2, '0');
+            
+            a.href = url;
+            a.download = `1099_manager_backup_${dateStr}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        function restoreData(input) {
+            const file = input.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    restoreCandidate = json;
+                    document.getElementById('restoreModal').classList.remove('hidden');
+                } catch(err) {
+                    console.error("Error reading backup file", err);
+                    alert("Invalid backup file.");
+                }
+            };
+            reader.readAsText(file);
+            input.value = ''; 
+        }
+        function closeRestoreModal() {
+            document.getElementById('restoreModal').classList.add('hidden');
+            restoreCandidate = null;
+        }
+        function confirmRestore() {
+            if (restoreCandidate) {
+                if(Array.isArray(restoreCandidate)) {
+                    appData = restoreCandidate;
+                    unitNotes = {}; 
+                    const companies = new Set(["Default Company"]);
+                    appData.forEach(d => { if(d.company) companies.add(d.company); });
+                    knownCompanies = Array.from(companies);
+                } else {
+                    appData = restoreCandidate.appData || [];
+                    unitNotes = restoreCandidate.unitNotes || {};
+                    knownCompanies = restoreCandidate.knownCompanies || ["Default Company"];
+                }
+                if(appData.length > 0 && appData[appData.length-1].company) {
+                    currentCompany = appData[appData.length-1].company;
+                } else {
+                    currentCompany = knownCompanies[0];
+                }
+                updateCompanyDropdown();
+                renderTable();
+                closeRestoreModal();
+            }
+        }
+
+        // --- PDF Report ---
+        function printReport() {
+            const tbody = document.getElementById('dataTableBody');
+            if(tbody.innerText.includes("No data")) return;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            const title = viewMode === 'current' 
+                ? `Settlement Report: ${currentCompany}`
+                : "Global Yearly Settlement Report";
+
+            doc.setFontSize(16);
+            doc.text(title, 14, 20);
+            doc.setFontSize(10);
+            doc.text("Generated: " + new Date().toLocaleString(), 14, 28);
+
+            let filteredData = [];
+            if (viewMode === 'current') {
+                filteredData = appData.filter(item => item.company === currentCompany);
+            } else {
+                filteredData = appData;
+            }
+
+            const aggregated = {};
+            filteredData.forEach(item => {
+                let key = "";
+                if (item.unit && item.unit !== "Unknown") {
+                    key = item.unit.toUpperCase();
+                } else {
+                    key = item.name.toUpperCase();
+                }
+                if(!aggregated[key]) {
+                    aggregated[key] = { unit: item.unit, name: item.name, total: 0 };
+                }
+                aggregated[key].total += item.amount;
+                if(aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
+            });
+
+            // Split
+            const owners = [];
+            const drivers = [];
+            Object.values(aggregated).forEach(item => {
+                if(item.unit && item.unit !== "") owners.push(item);
+                else drivers.push(item);
+            });
+
+            // Sort
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) {
+                    const numA = parseInt(a.unit.replace(/\D/g,''));
+                    const numB = parseInt(b.unit.replace(/\D/g,''));
+                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                }
+                return (a.name || "").localeCompare(b.name || "");
+            };
+            owners.sort(sortFn);
+            drivers.sort(sortFn);
+
+            let finalY = 35;
+
+            // 1. OWNER TABLE
+            if(owners.length > 0) {
+                const ownerRows = owners.map(row => {
+                    let nameDisplay = row.name;
+                    if(viewMode === 'current') {
+                        const noteKey = `${currentCompany}_${row.unit}`;
+                        if(unitNotes[noteKey]) nameDisplay += ` (Note: ${unitNotes[noteKey]})`;
+                    }
+                    const rateLabel = getCommissionLabel(row.unit);
+                    return [
+                        row.unit,
+                        nameDisplay,
+                        "$" + row.total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " " + rateLabel
+                    ];
+                });
+
+                // Add Owner Total
+                const ownerSum = owners.reduce((acc, curr) => acc + curr.total, 0);
+                ownerRows.push(["", "TOTAL OWNERS", "$" + ownerSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})]);
+
+                doc.autoTable({
+                    head: [['Unit #', 'Driver Name / Notes', 'After Commission']],
+                    body: ownerRows,
+                    startY: finalY,
+                    theme: 'grid',
+                    headStyles: { fillColor: viewMode === 'current' ? [41, 128, 185] : [46, 204, 113] },
+                    columnStyles: { 2: { halign: 'right' } },
+                    didParseCell: function(data) {
+                        if (data.row.index === ownerRows.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                    }
+                });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            // 2. DRIVER TABLE (No Unit, No Commission Label)
+            if(drivers.length > 0) {
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'bold');
+                doc.text("DRIVERS", 14, finalY);
+                finalY += 5;
+
+                const driverRows = drivers.map(row => {
+                    let nameDisplay = row.name;
+                    if(viewMode === 'current') {
+                        const noteKey = `${currentCompany}_${row.name}`;
+                        if(unitNotes[noteKey]) nameDisplay += ` (Note: ${unitNotes[noteKey]})`;
+                    }
+                    return [
+                        nameDisplay,
+                        "$" + row.total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                    ];
+                });
+
+                const driverSum = drivers.reduce((acc, curr) => acc + curr.total, 0);
+                driverRows.push(["TOTAL DRIVERS", "$" + driverSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})]);
+
+                doc.autoTable({
+                    head: [['Driver Name / Notes', 'Total Pay']],
+                    body: driverRows,
+                    startY: finalY,
+                    theme: 'grid',
+                    headStyles: { fillColor: [100, 100, 100] }, // Different color for drivers?
+                    columnStyles: { 1: { halign: 'right' } },
+                    didParseCell: function(data) {
+                        if (data.row.index === driverRows.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                    }
+                });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            // Optional Grand Total
+            const totalSum = filteredData.reduce((acc, curr) => acc + curr.amount, 0);
+            
+            // Only show Grand Total if we had both sections, otherwise the specific total is enough
+            if(owners.length > 0 && drivers.length > 0) {
+                doc.setFontSize(12);
+                // Calculate right alignment position (Page Width - Margin)
+                const pageWidth = doc.internal.pageSize.getWidth();
+                doc.text(
+                    "GRAND TOTAL: $" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}), 
+                    pageWidth - 14, 
+                    finalY, 
+                    { align: 'right' }
+                );
+            }
+
+            doc.save("Settlement_Report.pdf");
+        }
+    </script>
+</body>
+</html>
