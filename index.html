@@ -11,7 +11,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // PODESAVANJA
+        // SETTINGS
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -22,6 +22,7 @@
             measurementId: "G-42RMFB41Q2"
         };
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
+        const ADMIN_PIN = "0502"; // TVOJ ADMIN PIN
 
         let app, auth, provider;
         try {
@@ -31,7 +32,12 @@
             setPersistence(auth, browserLocalPersistence);
         } catch (e) { console.error(e); }
 
-        // --- LOGIKA ---
+        // --- ADMIN CHECK ON LOAD ---
+        if (localStorage.getItem('admin_mode') === 'true') {
+            window.location.href = "dashboard.html";
+        }
+
+        // --- LOGIC ---
         window.checkGateCode = async function() {
             const btn = document.getElementById('verifyBtn');
             const key = document.getElementById('gateInput').value.trim();
@@ -46,7 +52,6 @@
 
                 if (data.status === 'allowed') {
                     localStorage.setItem('my_access_key', key);
-                    // Ako je google vec spreman, idi dalje, inace prikazi google dugme
                     if (auth.currentUser) {
                         registerUserInDb(key, auth.currentUser.email);
                         window.location.href = "dashboard.html";
@@ -58,7 +63,7 @@
                     alert("Access Denied: " + (data.message || "Invalid Key"));
                 }
             } catch (e) {
-                alert("Connection Error.");
+                alert("Connection Error. Please check your internet.");
             }
             btn.disabled = false;
             btn.innerText = 'Verify';
@@ -72,17 +77,26 @@
             }).catch(e => alert(e.message));
         };
 
+        window.adminLogin = function() {
+            const pin = prompt("Enter Admin PIN:");
+            if (pin === ADMIN_PIN) {
+                localStorage.setItem('admin_mode', 'true');
+                window.location.href = "dashboard.html";
+            } else if (pin !== null) {
+                alert("Wrong PIN");
+            }
+        };
+
         function registerUserInDb(key, email) {
             fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, { method: "POST", mode: "no-cors" });
         }
 
-        // Auto-redirect ako je sve vec ok
         if(auth) {
             onAuthStateChanged(auth, (user) => {
                 const key = localStorage.getItem('my_access_key');
-                if (user && key) {
-                    // Brza provera - odmah salji na dashboard
-                    // Dashboard ce sam proveriti validnost kljuca u pozadini
+                // If admin, redirect handled at top.
+                // If user logged in and has key, redirect.
+                if (user && key && localStorage.getItem('admin_mode') !== 'true') {
                     window.location.href = "dashboard.html";
                 } else {
                     document.getElementById('loader').classList.add('hidden');
@@ -97,7 +111,12 @@
         }
     </script>
 </head>
-<body class="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
+<body class="bg-gray-900 min-h-screen flex items-center justify-center font-sans relative">
+
+    <!-- Admin Button (Top Right) -->
+    <button onclick="adminLogin()" class="absolute top-4 right-4 text-gray-700 hover:text-white transition focus:outline-none" title="Admin Login">
+        <i class="fas fa-user-shield text-xl"></i>
+    </button>
 
     <!-- Loader -->
     <div id="loader" class="text-white text-center">
@@ -106,7 +125,7 @@
     </div>
 
     <!-- Login Box -->
-    <div id="loginBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden">
+    <div id="loginBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden relative">
         
         <!-- Step 1: Code -->
         <div id="step1">
@@ -126,11 +145,12 @@
              <div class="text-center mb-6">
                 <i class="fab fa-google text-4xl text-blue-600 mb-2"></i>
                 <h1 class="text-2xl font-bold text-gray-800">Verify Identity</h1>
+                <p class="text-gray-500 text-sm mb-4">Key accepted. Verify with Google.</p>
             </div>
-            <button onclick="loginWithGoogle()" class="w-full border border-gray-300 py-3 rounded-lg font-bold hover:bg-gray-50 flex items-center justify-center gap-2">
+            <button onclick="loginWithGoogle()" class="w-full border border-gray-300 py-3 rounded-lg font-bold hover:bg-gray-50 flex items-center justify-center gap-2 mb-4">
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5"> Sign in with Google
             </button>
-            <button onclick="localStorage.removeItem('my_access_key'); location.reload()" class="mt-4 text-xs text-gray-400 underline">Change Key</button>
+            <button onclick="localStorage.removeItem('my_access_key'); location.reload()" class="text-xs text-gray-400 underline hover:text-gray-600">Change Key</button>
         </div>
 
     </div>
