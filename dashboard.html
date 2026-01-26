@@ -11,7 +11,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // 1. PODESAVANJA (Firebase Config je neophodan ovde da bismo znali ko je user)
+        // 1. SETTINGS
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -24,43 +24,43 @@
 
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
 
-        // Inicijalizacija Firebase-a
+        // Firebase Initialization
         let app, auth;
         try {
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
         } catch(e) { console.error("Firebase error", e); }
 
-        // Glavna funkcija
+        // Main Function
         async function initDashboard() {
             const key = localStorage.getItem('my_access_key');
             
-            // 1. Brza provera kljuca
+            // 1. Quick key check
             if (!key) {
                 goHome();
                 return;
             }
 
-            // 2. Provera Google Sesije i Prikaz Imena
+            // 2. Google Session Check and Name Display
             if (auth) {
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
-                        // Izvlacenje imena iz emaila (sve pre @)
+                        // Extract name
                         const rawName = user.email.split('@')[0];
-                        // Ulepsavanje (prvo slovo veliko)
                         const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-                        document.getElementById('userName').innerText = niceName;
+                        const el = document.getElementById('userName');
+                        if (el) el.innerText = niceName;
                         
-                        // Opciono: Proveri kljuc u bazi
+                        // Validate key in DB
                         validateSession(key); 
                     } else {
-                        // Ako nije ulogovan na Google, vrati ga na pocetak
+                        // Not logged in
                         goHome();
                     }
                 });
             } else {
-                // Fallback ako Firebase ne radi
-                document.getElementById('userName').innerText = "User";
+                const el = document.getElementById('userName');
+                if (el) el.innerText = "User";
             }
         }
 
@@ -70,16 +70,14 @@
                 const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(key)}`);
                 const data = await response.json();
                 if (data.status !== 'allowed') {
-                    alert("Pristupni ključ je istekao ili je banovan.");
+                    alert("Access key has expired or is banned.");
                     logout();
                 }
             } catch (e) { console.error("Offline check", e); }
         }
         
         window.logout = function() {
-            // 1. Obrisi kljuc
             localStorage.removeItem('my_access_key');
-            // 2. Izloguj sa Google-a
             if (auth) {
                 signOut(auth).then(() => goHome()).catch(() => goHome());
             } else {
@@ -88,7 +86,30 @@
         };
 
         function goHome() {
-            window.location.href = "index.html";
+            try {
+                // Pokusaj redirekcije na index.html
+                // Provera da li je URL validan pre redirekcije
+                if (window.location.protocol !== 'blob:') {
+                    window.location.href = "index.html";
+                } else {
+                    throw new Error("Preview mode");
+                }
+            } catch (e) {
+                console.warn("Redirection blocked (preview mode). Showing fallback.");
+                // Fallback UI ako redirekcija ne uspe
+                document.body.innerHTML = `
+                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
+                        <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
+                            <i class="fas fa-lock text-4xl text-blue-600 mb-4"></i>
+                            <h1 class="text-2xl font-bold mb-2">Authentication Required</h1>
+                            <p class="text-gray-600 mb-6">You need to log in to access this dashboard.</p>
+                            <a href="index.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition inline-block">
+                                Go to Login Page
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
         }
 
         initDashboard();
@@ -107,7 +128,7 @@
                 <!-- User Info -->
                 <div class="hidden md:flex items-center text-sm font-medium text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
                     <i class="fas fa-user-circle text-blue-500 mr-2 text-lg"></i>
-                    <span id="userName">Učitavanje...</span>
+                    <span id="userName">Loading...</span>
                 </div>
 
                 <!-- Logout Button -->
@@ -122,8 +143,8 @@
     <main class="flex-grow container mx-auto px-4 py-12">
         
         <div class="text-center mb-12">
-            <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Dobrodošao nazad!</h1>
-            <p class="text-lg text-gray-600">Svi tvoji alati na jednom mestu.</p>
+            <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Welcome Back!</h1>
+            <p class="text-lg text-gray-600">All your tools in one place.</p>
         </div>
 
         <!-- Tool Grid -->
@@ -136,9 +157,9 @@
                 </div>
                 <div class="p-6">
                     <h3 class="text-xl font-bold text-gray-800 mb-2">1099 Manager</h3>
-                    <p class="text-gray-500 text-sm mb-4">Obračun tura, PDF analiza i izveštaji za vozače.</p>
+                    <p class="text-gray-500 text-sm mb-4">Settlement calculation, PDF analysis, and driver reports.</p>
                     <div class="flex items-center text-blue-600 font-bold text-sm uppercase tracking-wide">
-                        Pokreni Alat <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
+                        Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
                     </div>
                 </div>
             </a>
@@ -150,23 +171,23 @@
                 </div>
                 <div class="p-6">
                     <h3 class="text-xl font-bold text-gray-800 mb-2">Payroll</h3>
-                    <p class="text-gray-500 text-sm mb-4">Kalkulator za plate, bonuse i odbitke zaposlenih.</p>
+                    <p class="text-gray-500 text-sm mb-4">Calculator for salaries, bonuses, and employee deductions.</p>
                     <div class="flex items-center text-green-600 font-bold text-sm uppercase tracking-wide">
-                        Pokreni Alat <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
+                        Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
                     </div>
                 </div>
             </a>
             
             <!-- TOOL 3: Notes -->
-            <a href="#" onclick="alert('Uskoro dostupno!')" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative grayscale opacity-75 hover:grayscale-0 hover:opacity-100">
+            <a href="#" onclick="alert('Coming soon!')" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative grayscale opacity-75 hover:grayscale-0 hover:opacity-100">
                 <div class="bg-yellow-500 p-6 flex justify-center items-center h-40">
                     <i class="fas fa-sticky-note text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
                 </div>
                 <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">Beleške</h3>
-                    <p class="text-gray-500 text-sm mb-4">Brzi podsetnici i važne informacije.</p>
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">Notes</h3>
+                    <p class="text-gray-500 text-sm mb-4">Quick reminders and important information.</p>
                     <div class="flex items-center text-yellow-600 font-bold text-sm uppercase tracking-wide">
-                        Uskoro...
+                        Coming soon...
                     </div>
                 </div>
             </a>
