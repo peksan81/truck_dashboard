@@ -39,23 +39,37 @@
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    const rawName = user.email.split('@')[0];
-                    const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-                    document.getElementById('userName').innerText = niceName;
-                } else {
-                    window.location.href = "index.html"; // Redirect if not logged in
-                }
-            });
+            // --- ADMIN CHECK (FIXED) ---
+            if (localStorage.getItem('admin_mode') === 'true') {
+                // Ako je Admin, samo prikazi ime i NE radi nista drugo (nema redirect-a)
+                const userEl = document.getElementById('userName');
+                if (userEl) userEl.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
+            } else {
+                // Ako NIJE Admin, onda trazi Google login
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        const rawName = user.email.split('@')[0];
+                        const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+                        document.getElementById('userName').innerText = niceName;
+                    } else {
+                        // Nije ulogovan i nije admin -> Izbaci napolje
+                        window.location.href = "index.html"; 
+                    }
+                });
+            }
 
             window.logout = function() {
                 localStorage.removeItem('my_access_key');
-                signOut(auth).then(() => window.location.href = "index.html");
+                localStorage.removeItem('admin_mode'); // Brise admin status
+                if (auth) {
+                    signOut(auth).then(() => window.location.href = "index.html").catch(() => window.location.href = "index.html");
+                } else {
+                    window.location.href = "index.html";
+                }
             };
         } catch(e) { console.error(e); }
 
-        // Theme Logic (Immediate apply)
+        // Theme Logic
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme === 'dark') {
             document.documentElement.classList.add('dark');
@@ -100,7 +114,7 @@
 </head>
 <body class="text-gray-800 bg-gray-50 font-sans dark:bg-gray-900 dark:text-gray-100" onload="initApp()">
 
-    <!-- Header / Navbar (Same as Dashboard) -->
+    <!-- Header / Navbar -->
     <nav class="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-50 transition-colors duration-300">
         <div class="container mx-auto flex justify-between items-center">
             <div class="flex items-center gap-4">
@@ -132,6 +146,7 @@
         </div>
     </nav>
 
+    <!-- Main Content Area -->
     <div class="container mx-auto px-4 py-8 max-w-7xl">
         
         <!-- Controls & Company Selector -->
@@ -238,7 +253,7 @@
                                 <tr class="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 uppercase text-xs tracking-wider">
                                     <th class="p-3 font-semibold w-1/4">Unit #</th>
                                     <th class="p-3 font-semibold w-1/4">Driver / Note</th>
-                                    <th class="p-3 font-semibold text-right w-1/4">Amount</th>
+                                    <th class="p-3 font-semibold text-right w-1/4">AFTER COMMISSION</th>
                                     <th class="p-3 font-semibold text-center w-1/4">Details</th>
                                 </tr>
                             </thead>
@@ -295,12 +310,33 @@
             </div>
         </div>
     </div>
+    
+    <!-- Delete File Confirmation Modal -->
+    <div id="deleteFileModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
+            <h3 class="text-lg font-bold mb-4 text-red-600 dark:text-red-400">Delete File?</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Are you sure you want to remove this file?</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeDeleteFileModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
+                <button onclick="confirmDeleteFile()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Delete</button>
+            </div>
+        </div>
+    </div>
 
-    <!-- LOGIC SCRIPT (With your existing parsing logic) -->
+    <!-- Clear Confirmation Modal -->
+    <div id="clearModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
+            <h3 class="text-lg font-bold mb-4 text-red-600 dark:text-red-400">Clear Data?</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">This will delete data for the current view. Cannot be undone.</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeClearModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
+                <button onclick="confirmClear()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT (Existing Logic + Admin Fix) -->
     <script>
-        // ... (Paste your existing app logic here, initApp, extractDataFromPDF, etc.) ...
-        // I will include the core logic structure below to ensure it works with the new UI.
-        
         let appData = []; 
         let unitNotes = {}; 
         let restoreCandidate = null;
@@ -319,7 +355,7 @@
             renderTable();
         }
         
-        // --- COMPANY & VIEW LOGIC (Same as before) ---
+        // --- COMPANY & VIEW LOGIC ---
         function updateCompanyDropdown() {
             const select = document.getElementById('companySelect');
             select.innerHTML = '';
@@ -346,7 +382,6 @@
             const overlay = document.getElementById('globalOverlay');
             const title = document.getElementById('reportTitle');
 
-            // Toggle Classes for Dark/Light mode compatibility
             const activeClass = ['bg-white', 'dark:bg-gray-700', 'text-blue-600', 'dark:text-blue-400', 'shadow-sm', 'border-gray-200', 'dark:border-gray-600'];
             const inactiveClass = ['text-gray-500', 'dark:text-gray-400', 'hover:text-gray-700', 'dark:hover:text-gray-200'];
 
@@ -368,7 +403,7 @@
             renderTable();
         }
 
-        // --- RENDER TABLE (Updated for Dark Mode) ---
+        // --- RENDER TABLE ---
         function renderTable() {
             const tbody = document.getElementById('dataTableBody');
             const footer = document.getElementById('tableFooter');
@@ -385,7 +420,6 @@
 
             footer.classList.remove('hidden');
             
-            // ... (Rest of aggregation logic is same) ...
             const aggregated = {};
             filteredData.forEach(item => {
                 let key = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
@@ -395,7 +429,6 @@
                 if (aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
             });
 
-            // Sorting & Splitting (Same as before)
             const owners = []; const drivers = [];
             Object.values(aggregated).forEach(item => { (item.unit && item.unit !== "") ? owners.push(item) : drivers.push(item); });
             const sortFn = (a, b) => {
@@ -414,7 +447,13 @@
                     const noteKey = `${currentCompany}_${group.unit || group.name}`;
                     const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
                     const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
-                    const rateLabel = (group.unit && (group.unit.includes("287") || group.unit.includes("3781"))) ? "(10%)" : (group.unit ? "(12%)" : "");
+                    
+                    // RATE LOGIC (Only for owners)
+                    let rateLabel = "";
+                    if (group.unit) {
+                        if (group.unit.includes("287") || group.unit.includes("3781")) rateLabel = "(10%)";
+                        else rateLabel = "(12%)";
+                    }
 
                     html += `
                     <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
@@ -462,7 +501,7 @@
             grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2});
         }
 
-        // --- HELPER FUNCTIONS (Modals etc) ---
+        // --- HELPER FUNCTIONS ---
         function toggleDetails(id) { document.getElementById(id).classList.toggle('hidden'); }
         function openNewCompanyModal() { document.getElementById('newCompanyModal').classList.remove('hidden'); }
         function closeNewCompanyModal() { document.getElementById('newCompanyModal').classList.add('hidden'); }
@@ -473,24 +512,258 @@
         function openNotesModal(k) { document.getElementById('noteUnitDisplay').innerText=k; document.getElementById('noteKey').value=`${currentCompany}_${k}`; document.getElementById('notesModal').classList.remove('hidden'); }
         function closeNotesModal() { document.getElementById('notesModal').classList.add('hidden'); }
         function saveNote() { unitNotes[document.getElementById('noteKey').value] = document.getElementById('noteInput').value; closeNotesModal(); renderTable(); }
-        function openClearModal() { if(confirm("Clear data?")) confirmClear(); } // Simplified for brevity
+        function openClearModal() { document.getElementById('clearModal').classList.remove('hidden'); } 
+        function closeClearModal() { document.getElementById('clearModal').classList.add('hidden'); }
         function confirmClear() { 
             if(viewMode==='global') { appData=[]; unitNotes={}; knownCompanies=["Default Company"]; currentCompany="Default Company"; } 
-            else { appData=appData.filter(i=>i.company!==currentCompany); } renderTable(); 
+            else { appData=appData.filter(i=>i.company!==currentCompany); } renderTable(); closeClearModal();
         }
         
-        // --- DRAG & DROP + PDF PARSING (Existing Logic) ---
+        // --- DRAG & DROP ---
         const dropZone = document.getElementById('dropZone');
         ['dragenter','dragover','dragleave','drop'].forEach(e => dropZone.addEventListener(e, preventDefaults, false));
         function preventDefaults(e){e.preventDefault();e.stopPropagation();}
         dropZone.addEventListener('drop', handleDrop, false);
         function handleDrop(e){ handleFiles(e.dataTransfer.files); }
         
-        // ... (Include your extractDataFromPDF function here exactly as before) ...
-        // ... (Include printReport function here exactly as before) ...
+        async function handleFiles(files) {
+            if (viewMode === 'global') { alert("Please switch to 'Current' view to upload files."); return; }
+            const fileArray = [...files].filter(f => f.type === 'application/pdf');
+            if(fileArray.length === 0) return;
+            
+            document.getElementById('processingStatus').classList.remove('hidden');
+            const pb = document.getElementById('progressBar');
+            const pt = document.getElementById('progressText');
+
+            for (let i = 0; i < fileArray.length; i++) {
+                const file = fileArray[i];
+                if (appData.some(d => d.filename === file.name && d.company === currentCompany)) continue;
+                
+                try {
+                    const data = await extractDataFromPDF(file);
+                    data.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                    data.company = currentCompany;
+                    appData.push(data);
+                } catch(e) { console.error(e); }
+                const pct = Math.round(((i + 1) / fileArray.length) * 100);
+                pb.style.width = pct + "%"; pt.innerText = pct + "%";
+            }
+            setTimeout(() => { document.getElementById('processingStatus').classList.add('hidden'); pb.style.width="0%"; }, 1000);
+            renderTable();
+        }
+
+        // --- PDF EXTRACTION (Included fully) ---
+        async function extractDataFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const textContent = await page.getTextContent();
+            
+            // Critical: Right side only
+            const rightSideBoundary = viewport.width * 0.4;
+            const rightSideItems = textContent.items.filter(item => item.transform[4] > rightSideBoundary);
+            rightSideItems.sort((a, b) => b.transform[5] - a.transform[5]);
+
+            let lines = [], currentLine = [], lastY = -1;
+            rightSideItems.forEach(item => {
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) currentLine.push(item);
+                else { currentLine.sort((a, b) => a.transform[4] - b.transform[4]); lines.push(currentLine); currentLine = [item]; }
+                lastY = item.transform[5];
+            });
+            if(currentLine.length) lines.push(currentLine);
+
+            let textLines = lines.map(line => ({ text: line.map(i => i.str).join(' ').trim(), y: line[0].transform[5], items: line }));
+            
+            let unit = "Unknown", name = "Unknown", amount = 0.0;
+
+            // 1. Unit
+            for(let l of textLines) {
+                const m = l.text.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
+                if(m) { let c = m[1].trim().split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim(); if(c) { unit = c; break; } }
+            }
+
+            // 2. Name
+            // Owner Op (Below Unit)
+            if(name === "Unknown") {
+                for(let i=0; i<textLines.length; i++) {
+                    if(/\b(unit|truck)\b/i.test(textLines[i].text.toLowerCase())) {
+                        for(let j=1; j<=3; j++) {
+                            if(i+j < textLines.length) {
+                                const pm = textLines[i+j].text.match(/^\((.+?)\)$/);
+                                if(pm) { name = pm[1].trim(); break; }
+                            }
+                        }
+                    }
+                    if(name !== "Unknown") break;
+                }
+            }
+            // Company Driver (Below STATEMENT)
+            let isCompanyDriver = false;
+            if(name === "Unknown") {
+                for(let i=0; i<textLines.length; i++) {
+                    const txt = textLines[i].text.toUpperCase();
+                    if(txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
+                        if(i+1 < textLines.length) {
+                            const nt = textLines[i+1].text;
+                            if(!/\d/.test(nt) && !/truck|unit|#/i.test(nt) && nt.length > 2) {
+                                name = nt; isCompanyDriver = true; break;
+                            }
+                        }
+                    }
+                }
+            }
+            if(isCompanyDriver) unit = ""; // Clear unit for drivers
+            // Fallback Name
+            if(name === "Unknown") {
+                for(let l of textLines) {
+                    const m = l.text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
+                    if(m) { name = m[1].trim(); break; }
+                }
+            }
+
+            // 3. Amount (Full text scan)
+            const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
+            let fullLines = [], cLine = [], lY = -1;
+            fullItems.forEach(i => {
+                if (lY === -1 || Math.abs(i.transform[5] - lY) < 6) cLine.push(i);
+                else { cLine.sort((a,b)=>a.transform[4]-b.transform[4]); fullLines.push(cLine.map(x=>x.str).join(' ')); cLine=[i]; }
+                lY = i.transform[5];
+            });
+            if(cLine.length) fullLines.push(cLine.map(x=>x.str).join(' '));
+
+            if(isCompanyDriver) {
+                let found = false;
+                for(let l of fullLines) {
+                    if(/check total|net pay|check amount/i.test(l)) {
+                        const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                        if(m) { amount = parseFloat(m[1].replace(',','')); found=true; }
+                    }
+                }
+                if(!found) {
+                     for(let i=fullLines.length-1; i>=0; i--) {
+                         if(/total/i.test(fullLines[i])) {
+                             const m = fullLines[i].match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                             if(m) { amount = parseFloat(m[1].replace(',','')); break; }
+                         }
+                     }
+                }
+            } else {
+                // Owner Op (Trip Total)
+                let tf = false;
+                for(let l of fullLines) {
+                    if(/trip/i.test(l)) tf=true;
+                    if(tf && /total/i.test(l)) {
+                        const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                        if(m) { amount = parseFloat(m[1].replace(',','')); break; }
+                    }
+                }
+                if(amount === 0) {
+                     for(let l of fullLines) {
+                         if(/total/i.test(l)) {
+                             const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                             if(m) { amount = parseFloat(m[1].replace(',','')); break; }
+                         }
+                     }
+                }
+            }
+
+            return { unit, name, amount, filename: file.name };
+        }
+
+        function backupData() {
+            if(appData.length===0) return;
+            const payload = { version: 2, appData, unitNotes, knownCompanies };
+            const blob = new Blob([JSON.stringify(payload,null,2)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const d = new Date();
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
+            a.href = url; a.download = `1099_manager_backup_${dateStr}.json`; a.click();
+        }
         
-        // Note: For brevity in this response, assume the complex PDF logic is pasted here.
-        // It fits perfectly into this structure.
+        function restoreData(input) {
+            const file = input.files[0]; if(!file) return;
+            const r = new FileReader();
+            r.onload = e => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    // Handle V1 or V2
+                    if(Array.isArray(json)) { appData=json; unitNotes={}; const s=new Set(["Default Company"]); appData.forEach(d=>{if(d.company)s.add(d.company)}); knownCompanies=Array.from(s); }
+                    else { appData=json.appData||[]; unitNotes=json.unitNotes||{}; knownCompanies=json.knownCompanies||["Default Company"]; }
+                    if(appData.length) currentCompany = appData[appData.length-1].company || knownCompanies[0];
+                    updateCompanyDropdown(); renderTable();
+                } catch(err) { alert("Invalid backup file."); }
+            };
+            r.readAsText(file); input.value='';
+        }
+        
+        function deleteFile(id) { fileToDeleteId=id; document.getElementById('deleteFileModal').classList.remove('hidden'); }
+        function closeDeleteFileModal() { document.getElementById('deleteFileModal').classList.add('hidden'); }
+        function confirmDeleteFile() { if(fileToDeleteId){ appData=appData.filter(d=>d.id!==fileToDeleteId); renderTable(); closeDeleteFileModal(); } }
+
+        function printReport() {
+            const tbody = document.getElementById('dataTableBody');
+            if(tbody.innerText.includes("No data")) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const title = viewMode === 'current' ? `Settlement Report: ${currentCompany}` : "Global Yearly Settlement Report";
+            doc.setFontSize(16); doc.text(title, 14, 20);
+            doc.setFontSize(10); doc.text("Generated: " + new Date().toLocaleString(), 14, 28);
+            
+            let filteredData = (viewMode === 'current') ? appData.filter(i => i.company === currentCompany) : appData;
+            const aggregated = {};
+            filteredData.forEach(item => {
+                let key = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
+                if(!aggregated[key]) aggregated[key] = { unit: item.unit, name: item.name, total: 0 };
+                aggregated[key].total += item.amount;
+                if(aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
+            });
+            
+            const owners = [], drivers = [];
+            Object.values(aggregated).forEach(item => { (item.unit && item.unit !== "") ? owners.push(item) : drivers.push(item); });
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) { const nA = parseInt(a.unit.replace(/\D/g,'')), nB = parseInt(b.unit.replace(/\D/g,'')); if(!isNaN(nA)&&!isNaN(nB)) return nA-nB; }
+                return (a.name||"").localeCompare(b.name||"");
+            };
+            owners.sort(sortFn); drivers.sort(sortFn);
+
+            let finalY = 35;
+            if(owners.length > 0) {
+                const rows = owners.map(r => {
+                    let name = r.name;
+                    if(viewMode==='current' && unitNotes[`${currentCompany}_${r.unit}`]) name += ` (Note: ${unitNotes[`${currentCompany}_${r.unit}`]})`;
+                    const rate = (r.unit.includes("287")||r.unit.includes("3781")) ? "(10%)" : "(12%)";
+                    return [r.unit, name, "$" + r.total.toLocaleString('en-US', {minimumFractionDigits: 2}) + " " + rate];
+                });
+                const sum = owners.reduce((a,c)=>a+c.total,0);
+                rows.push(["", "TOTAL OWNERS", "$" + sum.toLocaleString('en-US', {minimumFractionDigits: 2})]);
+                
+                doc.autoTable({ head: [['Unit #', 'Driver Name / Notes', 'After Commission']], body: rows, startY: finalY, theme: 'grid', columnStyles: { 2: { halign: 'right' } } });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            if(drivers.length > 0) {
+                doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text("DRIVERS", 14, finalY); finalY += 5;
+                const rows = drivers.map(r => {
+                    let name = r.name;
+                    if(viewMode==='current' && unitNotes[`${currentCompany}_${r.name}`]) name += ` (Note: ${unitNotes[`${currentCompany}_${r.name}`]})`;
+                    return [name, "$" + r.total.toLocaleString('en-US', {minimumFractionDigits: 2})];
+                });
+                const sum = drivers.reduce((a,c)=>a+c.total,0);
+                rows.push(["TOTAL DRIVERS", "$" + sum.toLocaleString('en-US', {minimumFractionDigits: 2})]);
+                
+                doc.autoTable({ head: [['Driver Name / Notes', 'Total Pay']], body: rows, startY: finalY, theme: 'grid', columnStyles: { 1: { halign: 'right' } } });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            const total = filteredData.reduce((acc, curr) => acc + curr.amount, 0);
+            if(owners.length > 0 && drivers.length > 0) {
+                doc.setFontSize(12);
+                doc.text("GRAND TOTAL: $" + total.toLocaleString('en-US', {minimumFractionDigits: 2}), doc.internal.pageSize.getWidth()-14, finalY, {align:'right'});
+            }
+            doc.save("Settlement_Report.pdf");
+        }
     </script>
 </body>
 </html>
