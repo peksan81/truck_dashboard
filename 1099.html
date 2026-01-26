@@ -24,7 +24,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
@@ -36,7 +36,7 @@
             measurementId: "G-42RMFB41Q2"
         };
 
-        // GLOBAL VARIABLES EXPORTED TO WINDOW FOR HTML ACCESS
+        // GLOBAL VARIABLES
         window.appData = []; 
         window.unitNotes = {}; 
         window.restoreCandidate = null;
@@ -51,10 +51,18 @@
             auth = getAuth(app);
             db = getFirestore(app);
             
+            // --- ENABLE OFFLINE PERSISTENCE (FIX FOR "CLIENT IS OFFLINE" ERROR) ---
+            enableIndexedDbPersistence(db).catch((err) => {
+                if (err.code == 'failed-precondition') {
+                    console.warn('Persistence failed: Multiple tabs open.');
+                } else if (err.code == 'unimplemented') {
+                    console.warn('Persistence failed: Browser not supported.');
+                }
+            });
+
             // --- AUTH CHECK ---
-            // If Admin, skip check. If not, verify user.
             if (localStorage.getItem('admin_mode') === 'true') {
-                 // Admin logic handled in initApp
+                 // Admin logic
             } else {
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
@@ -103,7 +111,7 @@
 
             try {
                 const user = auth.currentUser;
-                await setDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"), {
+                await setDoc(doc(db, "users", user.uid, "data", "1099_backup"), {
                     version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies, lastUpdated: new Date().toISOString()
                 });
                 
@@ -128,7 +136,7 @@
                 statusText.innerText = "Save failed!";
                 statusText.classList.remove('text-gray-400', 'text-green-600');
                 statusText.classList.add('text-red-500');
-                alert("Error saving: " + e.message);
+                alert("Cloud Error: " + e.message + "\n\nTip: Try the 'Backup' button (File download) instead if this persists.");
             } finally {
                 btn.disabled = false;
             }
@@ -144,7 +152,10 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
             try {
+                const user = auth.currentUser;
+                // Force a check but allow cache
                 const snap = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"));
+                
                 if(snap.exists()) {
                     const json = snap.data();
                     if(confirm("Load backup from " + new Date(json.lastUpdated).toLocaleString() + "?")) {
@@ -161,224 +172,31 @@
                         renderTable();
                         document.getElementById('cloudStatus').innerText = "Loaded: " + new Date().toLocaleTimeString();
                     }
-                } else { alert("No backup found."); }
-            } catch(e) { alert("Error loading: " + e.message); } finally {
+                } else { alert("No backup found in Cloud."); }
+            } catch(e) { 
+                console.error(e);
+                alert("Cloud Error: " + e.message + "\n\nIf you have a .json file, use 'Restore' button instead."); 
+            } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
             }
         };
-    </script>
-</head>
-<body class="text-gray-800 bg-gray-50 font-sans dark:bg-gray-900 dark:text-gray-100" onload="initApp()">
 
-    <!-- Header / Navbar -->
-    <nav class="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-50 transition-colors duration-300">
-        <div class="container mx-auto flex justify-between items-center">
-            <div class="flex items-center gap-4">
-                <a href="dashboard.html" class="text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition">
-                    <i class="fas fa-arrow-left text-xl"></i>
-                </a>
-                <div class="font-bold text-xl text-gray-700 dark:text-white flex items-center">
-                    <i class="fas fa-truck-moving text-blue-600 mr-2"></i> 1099 Manager
-                </div>
-            </div>
-            
-            <div class="flex items-center gap-4">
-                <button onclick="toggleTheme()" class="p-2 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition focus:outline-none">
-                    <i id="themeIcon" class="fas fa-lightbulb text-gray-400"></i>
-                </button>
-                <div class="hidden md:flex items-center text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-full border dark:border-gray-600">
-                    <i class="fas fa-user-circle text-blue-500 mr-2 text-lg"></i>
-                    <span id="userName">Loading...</span>
-                </div>
-                <button onclick="logout()" class="text-xs font-bold text-red-500 hover:text-white border border-red-200 dark:border-red-900 hover:bg-red-500 px-4 py-2 rounded-lg transition shadow-sm flex items-center">
-                    <i class="fas fa-sign-out-alt mr-2"></i> Log Out
-                </button>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Main Content -->
-    <div class="container mx-auto px-4 py-8 max-w-6xl">
-        
-        <!-- Controls -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6 border border-gray-100 dark:border-gray-700">
-            <div class="flex flex-col md:flex-row justify-between items-center gap-4">
-                <div class="flex-1 w-full">
-                    <label class="block text-xs font-bold text-blue-800 dark:text-blue-400 uppercase mb-1">Active Company</label>
-                    <div class="flex gap-2">
-                        <div class="relative flex-1">
-                            <select id="companySelect" onchange="switchCompany(this.value)" class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 appearance-none focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 cursor-pointer"></select>
-                            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-400"><i class="fas fa-chevron-down text-xs"></i></div>
-                        </div>
-                        <button onclick="openNewCompanyModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition shadow-sm whitespace-nowrap"><i class="fas fa-plus mr-1"></i> New</button>
-                    </div>
-                </div>
-                
-                <!-- Cloud/Local Buttons -->
-                <div class="flex flex-col items-end">
-                    <div class="flex items-center gap-2">
-                        <button id="btnSaveCloud" onclick="saveToCloud()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg transition text-sm font-medium shadow-sm" title="Save to Cloud">
-                            <i class="fas fa-cloud-upload-alt"></i>
-                        </button>
-                        <button id="btnLoadCloud" onclick="loadFromCloud()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200 px-3 py-2 rounded-lg transition text-sm font-medium shadow-sm" title="Load from Cloud">
-                            <i class="fas fa-cloud-download-alt"></i>
-                        </button>
-                        <div class="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
-                        <button onclick="document.getElementById('restoreInput').click()" class="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg transition text-sm font-medium border dark:border-gray-600" title="Upload File">
-                            <i class="fas fa-file-upload"></i>
-                        </button>
-                        <input type="file" id="restoreInput" class="hidden" accept=".json" onchange="restoreData(this)">
-                        <button onclick="backupData()" class="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-2 rounded-lg transition text-sm font-medium border dark:border-gray-600" title="Download File">
-                            <i class="fas fa-file-download"></i>
-                        </button>
-                    </div>
-                    <span id="cloudStatus" class="text-xs text-gray-400 font-mono mt-1 mr-1">Not synced</span>
-                </div>
-
-                <div class="flex items-center gap-3 bg-gray-50 dark:bg-gray-900 px-4 py-2 rounded-lg border dark:border-gray-700">
-                    <span class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">View:</span>
-                    <div class="flex gap-1">
-                        <button id="btnViewCurrent" onclick="switchView('current')" class="px-3 py-1 rounded-md text-sm font-medium transition bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm border dark:border-gray-600">Current</button>
-                        <button id="btnViewGlobal" onclick="switchView('global')" class="px-3 py-1 rounded-md text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition">Global</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Grid -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- LEFT: Upload Zone -->
-            <div class="lg:col-span-1" id="uploadSection">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 h-full flex flex-col relative border border-gray-100 dark:border-gray-700">
-                    <h2 class="font-bold text-lg mb-4 text-gray-700 dark:text-white">1. Upload Files</h2>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Adding to: <span id="uploadTargetCompany" class="font-bold text-blue-600 dark:text-blue-400">...</span></p>
-                    <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl flex-1 flex flex-col justify-center items-center p-8 text-center cursor-pointer min-h-[200px] bg-gray-50 dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-gray-800 transition-colors" onclick="document.getElementById('fileInput').click()">
-                        <div class="bg-blue-100 dark:bg-blue-900 p-4 rounded-full mb-3"><i class="fas fa-file-pdf text-blue-500 dark:text-blue-300 text-2xl"></i></div>
-                        <p class="font-medium text-gray-700 dark:text-gray-300">Click to upload</p>
-                        <p class="text-sm text-gray-400">or drag & drop PDFs</p>
-                        <input type="file" id="fileInput" class="hidden" accept="application/pdf" multiple onchange="handleFiles(this.files)">
-                    </div>
-                    <!-- Global Mode Overlay -->
-                    <div id="globalOverlay" class="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 hidden flex flex-col items-center justify-center rounded-lg text-center p-6">
-                        <i class="fas fa-lock text-gray-400 text-3xl mb-2"></i>
-                        <p class="font-bold text-gray-600 dark:text-gray-300">Upload Disabled</p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Switch to "Current" view.</p>
-                    </div>
-                    <div id="processingStatus" class="mt-4 hidden">
-                        <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400 mb-1"><span>Processing...</span><span id="progressText">0%</span></div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5"><div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- RIGHT: Results Table -->
-            <div class="lg:col-span-2">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 min-h-[500px] border border-gray-100 dark:border-gray-700">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="font-bold text-lg text-gray-700 dark:text-white" id="reportTitle">Report</h2>
-                        <div class="flex gap-2">
-                            <button onclick="openClearModal()" class="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 px-3 py-1.5 rounded-lg transition text-sm border border-transparent hover:border-red-100 dark:hover:border-red-900"><i class="fas fa-trash-alt mr-1"></i> Clear</button>
-                            <button onclick="printReport()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition text-sm font-medium shadow-sm"><i class="fas fa-print mr-2"></i> Print PDF</button>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead>
-                                <tr class="bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 uppercase text-xs tracking-wider">
-                                    <th class="p-3 font-semibold w-1/4">Unit #</th>
-                                    <th class="p-3 font-semibold w-1/4">Driver / Note</th>
-                                    <th class="p-3 font-semibold text-right w-1/4">AFTER COMMISSION</th>
-                                    <th class="p-3 font-semibold text-center w-1/4">Details</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dataTableBody" class="text-sm text-gray-700 dark:text-gray-300 divide-y divide-gray-100 dark:divide-gray-700">
-                                <tr><td colspan="4" class="p-8 text-center text-gray-400">No data yet.</td></tr>
-                            </tbody>
-                            <tfoot id="tableFooter" class="hidden">
-                                <tr class="bg-blue-50 dark:bg-blue-900/30 font-bold text-gray-800 dark:text-white border-t-2 border-blue-100 dark:border-blue-800">
-                                    <td class="p-3">TOTAL</td>
-                                    <td class="p-3"></td>
-                                    <td class="p-3 text-right" id="grandTotal">$0.00</td>
-                                    <td class="p-3"></td>
-                                </tr>
-                            </tfoot>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODALS -->
-    <!-- (Modals are same as before, included below for completeness) -->
-    <div id="newCompanyModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
-            <h3 class="text-lg font-bold mb-4 dark:text-white">Add Company</h3>
-            <input type="text" id="newCompanyName" class="w-full border dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-3 mb-4 outline-none" placeholder="Company Name...">
-            <div class="flex justify-end gap-2">
-                <button onclick="closeNewCompanyModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-                <button onclick="confirmNewCompany()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add</button>
-            </div>
-        </div>
-    </div>
-    <div id="editModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
-            <h3 class="text-lg font-bold mb-4 dark:text-white">Edit Unit</h3>
-            <input type="text" id="editUnitInput" class="w-full border dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-2 mb-4 outline-none">
-            <input type="hidden" id="editFileIndex">
-            <div class="flex justify-end gap-2">
-                <button onclick="closeEditModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-                <button onclick="saveUnitEdit()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save</button>
-            </div>
-        </div>
-    </div>
-    <div id="notesModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
-            <h3 class="text-lg font-bold mb-4 dark:text-white">Notes</h3>
-            <textarea id="noteInput" class="w-full border dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-3 mb-4 h-32 outline-none resize-none"></textarea>
-            <input type="hidden" id="noteKey">
-            <div class="flex justify-end gap-2">
-                <button onclick="closeNotesModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-                <button onclick="saveNote()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save</button>
-            </div>
-        </div>
-    </div>
-    <div id="deleteFileModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
-            <h3 class="text-lg font-bold mb-4 text-red-600 dark:text-red-400">Delete File?</h3>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Confirm deletion.</p>
-            <div class="flex justify-end gap-2">
-                <button onclick="closeDeleteFileModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-                <button onclick="confirmDeleteFile()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Delete</button>
-            </div>
-        </div>
-    </div>
-    <div id="clearModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden flex items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 shadow-xl border dark:border-gray-700">
-            <h3 class="text-lg font-bold mb-4 text-red-600 dark:text-red-400">Clear Data?</h3>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">This will delete data for current view.</p>
-            <div class="flex justify-end gap-2">
-                <button onclick="closeClearModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
-                <button onclick="confirmClear()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Clear</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- SCRIPT -->
-    <script>
         window.initApp = function() {
+            // Theme
             const savedTheme = localStorage.getItem('theme');
             if (savedTheme === 'dark') {
                 document.documentElement.classList.add('dark');
                 updateBulbIcon(true);
             }
+            
+            // Admin UI
             if (localStorage.getItem('admin_mode') === 'true') {
                  const el = document.getElementById('userName');
                  if(el) el.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
             }
-            
-            // Drag Drop
+
+            // Setup Dropzone
             const dropZone = document.getElementById('dropZone');
             ['dragenter','dragover','dragleave','drop'].forEach(e => dropZone.addEventListener(e, preventDefaults, false));
             dropZone.addEventListener('drop', handleDrop, false);
@@ -391,26 +209,49 @@
         function handleDrop(e){ window.handleFiles(e.dataTransfer.files); }
 
         window.handleFiles = async function(files) {
-            if (window.viewMode === 'global') { alert("Please switch to 'Current' view."); return; }
+            if (viewMode === 'global') {
+                alert("Please switch to 'Current' view to upload files.");
+                return;
+            }
+
             const fileArray = [...files].filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-            if(fileArray.length === 0) { alert("No PDFs found."); return; }
+            
+            if(fileArray.length === 0) {
+                alert("No valid PDF files found.");
+                return;
+            }
+
             document.getElementById('processingStatus').classList.remove('hidden');
             const pb = document.getElementById('progressBar');
+            const pt = document.getElementById('progressText');
+
             for (let i = 0; i < fileArray.length; i++) {
                 const file = fileArray[i];
-                if (window.appData.some(d => d.filename === file.name && d.company === window.currentCompany)) continue;
+                if (appData.some(d => d.filename === file.name && d.company === currentCompany)) continue;
+
                 try {
                     const data = await extractDataFromPDF(file);
                     data.id = Date.now() + Math.random().toString(36).substr(2, 9);
-                    data.company = window.currentCompany;
-                    window.appData.push(data);
-                } catch(e) { console.error(e); }
-                pb.style.width = Math.round(((i + 1) / fileArray.length) * 100) + "%";
+                    data.company = currentCompany;
+                    appData.push(data);
+                } catch(e) {
+                    console.error("Error parsing " + file.name, e);
+                }
+
+                const pct = Math.round(((i + 1) / fileArray.length) * 100);
+                pb.style.width = pct + "%";
+                pt.innerText = pct + "%";
             }
-            setTimeout(() => { document.getElementById('processingStatus').classList.add('hidden'); pb.style.width="0%"; }, 1000);
+
+            setTimeout(() => {
+                document.getElementById('processingStatus').classList.add('hidden');
+                pb.style.width = "0%";
+            }, 1000);
+
             renderTable();
         };
 
+        // --- PDF PARSING CORE ---
         async function extractDataFromPDF(file) {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -418,92 +259,141 @@
             const viewport = page.getViewport({ scale: 1.0 });
             const textContent = await page.getTextContent();
             
-            // Critical: Right side only
+            // --- CRITICAL FILTER: IGNORE LEFT SIDE ---
             const rightSideBoundary = viewport.width * 0.4;
             const rightSideItems = textContent.items.filter(item => item.transform[4] > rightSideBoundary);
             rightSideItems.sort((a, b) => b.transform[5] - a.transform[5]);
 
             let lines = [], currentLine = [], lastY = -1;
             rightSideItems.forEach(item => {
-                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) currentLine.push(item);
-                else { currentLine.sort((a, b) => a.transform[4] - b.transform[4]); lines.push(currentLine); currentLine = [item]; }
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) {
+                    currentLine.push(item);
+                } else {
+                    currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                    lines.push(currentLine);
+                    currentLine = [item];
+                }
                 lastY = item.transform[5];
             });
-            if(currentLine.length) lines.push(currentLine);
-            let textLines = lines.map(line => ({ text: line.map(i => i.str).join(' ').trim(), y: line[0].transform[5], items: line }));
-            
-            let unit = "Unknown", name = "Unknown", amount = 0.0;
+            if (currentLine.length > 0) lines.push(currentLine);
 
-            for(let l of textLines) {
-                const m = l.text.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
-                if(m) { let c = m[1].trim().split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim(); if(c) { unit = c; break; } }
+            let textLines = lines.map(line => {
+                return {
+                    text: line.map(item => item.str).join(' ').trim(), 
+                    y: line[0].transform[5],
+                    items: line
+                };
+            });
+
+            // --- EXTRACTION VARIABLES ---
+            let unit = "Unknown";
+            let name = "Unknown";
+            let amount = 0.0;
+
+            // 2. EXTRACT UNIT 
+            for (let i = 0; i < textLines.length; i++) {
+                const txt = textLines[i].text;
+                const match = txt.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
+                if (match) {
+                    let candidate = match[1].trim();
+                    candidate = candidate.split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim();
+                    if(candidate.length > 0) {
+                        unit = candidate;
+                        break; 
+                    }
+                }
             }
 
-            if(name === "Unknown") {
-                for(let i=0; i<textLines.length; i++) {
-                    if(/\b(unit|truck)\b/i.test(textLines[i].text.toLowerCase())) {
-                        for(let j=1; j<=3; j++) {
-                            if(i+j < textLines.length) {
-                                const pm = textLines[i+j].text.match(/^\((.+?)\)$/);
-                                if(pm) { name = pm[1].trim(); break; }
+            // 3. EXTRACT NAME 
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
+                    const txt = textLines[i].text.toLowerCase();
+                    if (/\b(unit|truck)\b/i.test(txt)) {
+                        for (let j = 1; j <= 3; j++) {
+                            if (i + j < textLines.length) {
+                                const nextTxt = textLines[i+j].text;
+                                const parenMatch = nextTxt.match(/^\((.+?)\)$/);
+                                if (parenMatch) {
+                                    name = parenMatch[1].trim();
+                                    break;
+                                }
                             }
                         }
                     }
-                    if(name !== "Unknown") break;
+                    if (name !== "Unknown") break;
                 }
             }
+
             let isCompanyDriver = false;
-            if(name === "Unknown") {
-                for(let i=0; i<textLines.length; i++) {
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
                     const txt = textLines[i].text.toUpperCase();
-                    if(txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
-                        if(i+1 < textLines.length) {
-                            const nt = textLines[i+1].text;
-                            if(!/\d/.test(nt) && !/truck|unit|#/i.test(nt) && nt.length > 2) {
-                                name = nt; isCompanyDriver = true; break;
+                    if (txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
+                        if (i + 1 < textLines.length) {
+                            const nextTxt = textLines[i+1].text;
+                            const isDate = /\d/.test(nextTxt) && (nextTxt.includes('-') || nextTxt.includes('/'));
+                            const isUnit = /truck|unit|#/i.test(nextTxt);
+                            
+                            if (!isDate && !isUnit && nextTxt.length > 2) {
+                                name = nextTxt;
+                                isCompanyDriver = true;
+                                break;
                             }
                         }
                     }
                 }
             }
-            if(isCompanyDriver) unit = ""; 
-            if(name === "Unknown") {
-                for(let l of textLines) {
-                    const m = l.text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
-                    if(m) { name = m[1].trim(); break; }
+
+            if (isCompanyDriver) unit = ""; 
+
+            if (name === "Unknown") {
+                for (let i = 0; i < textLines.length; i++) {
+                    const match = textLines[i].text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
+                    if (match) {
+                        name = match[1].trim();
+                        break;
+                    }
                 }
             }
 
+            // 4. EXTRACT TOTAL
             const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
             let fullLines = [], cLine = [], lY = -1;
-            fullItems.forEach(i => {
-                if (lY === -1 || Math.abs(i.transform[5] - lY) < 6) cLine.push(i);
-                else { cLine.sort((a,b)=>a.transform[4]-b.transform[4]); fullLines.push(cLine.map(x=>x.str).join(' ')); cLine=[i]; }
-                lY = i.transform[5];
+            fullItems.forEach(item => {
+                if (lY === -1 || Math.abs(item.transform[5] - lY) < 6) {
+                    cLine.push(item);
+                } else {
+                    cLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                    fullLines.push(cLine.map(i=>i.str).join(' '));
+                    cLine = [item];
+                }
+                lY = item.transform[5];
             });
-            if(cLine.length) fullLines.push(cLine.map(x=>x.str).join(' '));
+            if(cLine.length) fullLines.push(cLine.map(i=>i.str).join(' '));
 
-            if(isCompanyDriver) {
+            if (isCompanyDriver) {
                 let checkTotalFound = false;
                 for(let l of fullLines) {
-                    if(/check total|net pay|check amount/i.test(l)) {
+                    const lower = l.toLowerCase();
+                    if(lower.includes('check total') || lower.includes('net pay') || lower.includes('check amount')) {
                         const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                         if(m) { amount = parseFloat(m[1].replace(',','')); checkTotalFound=true; }
                     }
                 }
-                if(!checkTotalFound) {
-                     for(let i=fullLines.length-1; i>=0; i--) {
-                         if(/total/i.test(fullLines[i])) {
+                if (!checkTotalFound) {
+                     for(let i = fullLines.length - 1; i >= 0; i--) {
+                         if(fullLines[i].toLowerCase().includes('total')) {
                              const m = fullLines[i].match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                              if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                          }
                      }
                 }
             } else {
-                let tf = false;
+                let tripFound = false;
                 for(let l of fullLines) {
-                    if(/trip/i.test(l)) tf=true;
-                    if(tf && /total/i.test(l)) {
+                    const lower = l.toLowerCase();
+                    if(lower.includes('trip')) tripFound = true;
+                    if(tripFound && lower.includes('total')) {
                         const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                         if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                     }
@@ -517,6 +407,7 @@
                      }
                 }
             }
+
             return { unit, name, amount, filename: file.name };
         }
 
@@ -531,10 +422,17 @@
             const footer = document.getElementById('tableFooter');
             const grandTotalEl = document.getElementById('grandTotal');
             
-            let filteredData = (window.viewMode === 'current') ? window.appData.filter(i => i.company === window.currentCompany) : window.appData;
+            let filteredData = [];
+            if (viewMode === 'current') {
+                filteredData = appData.filter(item => item.company === currentCompany);
+            } else {
+                filteredData = appData; 
+            }
 
             if(filteredData.length === 0) {
-                const msg = window.viewMode === 'current' ? `No data for <b>${window.currentCompany}</b>.` : `No data uploaded.`;
+                const msg = viewMode === 'current' 
+                    ? `No data for <b>${currentCompany}</b>. Upload files or switch companies.` 
+                    : `No data uploaded yet.`;
                 tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 dark:text-gray-500">${msg}</td></tr>`;
                 footer.classList.add('hidden');
                 return;
@@ -543,64 +441,110 @@
             footer.classList.remove('hidden');
             const aggregated = {};
             filteredData.forEach(item => {
-                let key = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
-                if(!aggregated[key]) aggregated[key] = { unit: item.unit, name: item.name, totalAmount: 0, files: [] };
+                let key = "";
+                if (item.unit && item.unit !== "Unknown") {
+                    key = item.unit.toUpperCase();
+                } else {
+                    key = item.name.toUpperCase();
+                }
+                
+                if(!aggregated[key]) {
+                    aggregated[key] = { unit: item.unit, name: item.name, totalAmount: 0, files: [] };
+                }
+                
                 aggregated[key].totalAmount += item.amount;
                 aggregated[key].files.push(item);
-                if (aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
+                
+                if (aggregated[key].name === "Unknown" && item.name !== "Unknown") {
+                    aggregated[key].name = item.name;
+                }
             });
 
-            const owners = [], drivers = [];
-            Object.values(aggregated).forEach(item => { (item.unit && item.unit !== "") ? owners.push(item) : drivers.push(item); });
-            const sortFn = (a, b) => {
-                if (a.unit && b.unit) { const nA = parseInt(a.unit.replace(/\D/g,'')), nB = parseInt(b.unit.replace(/\D/g,'')); if(!isNaN(nA)&&!isNaN(nB)) return nA-nB; }
-                return (a.name||"").localeCompare(b.name||"");
-            };
-            owners.sort(sortFn); drivers.sort(sortFn);
+            const owners = [];
+            const drivers = [];
+            Object.values(aggregated).forEach(item => {
+                if (item.unit && item.unit !== "") owners.push(item);
+                else drivers.push(item);
+            });
 
-            let html = '', totalSum = 0;
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) {
+                    const numA = parseInt(a.unit.replace(/\D/g,''));
+                    const numB = parseInt(b.unit.replace(/\D/g,''));
+                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                }
+                return (a.name || "").localeCompare(b.name || "");
+            };
+
+            owners.sort(sortFn);
+            drivers.sort(sortFn);
+
+            let html = '';
+            let totalSum = 0;
+
             const renderRows = (list) => {
                 list.forEach(group => {
                     totalSum += group.totalAmount;
                     const safeKey = (group.unit || group.name).replace(/[^a-zA-Z0-9]/g, '_'); 
-                    const noteKey = `${window.currentCompany}_${group.unit || group.name}`;
-                    const hasNote = window.unitNotes[noteKey] && window.unitNotes[noteKey].trim() !== "";
+                    const noteKey = `${currentCompany}_${group.unit || group.name}`;
+                    const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
                     const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
-                    let rateLabel = "";
-                    if (group.unit) rateLabel = getCommissionLabel(group.unit);
+                    
+                    const displayUnit = group.unit || "";
+                    const rateLabel = group.unit ? getCommissionLabel(group.unit) : "";
 
                     html += `
-                    <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                        <td class="p-3 font-bold text-gray-800 dark:text-gray-200">${group.unit || ""}</td>
-                        <td class="p-3 text-gray-600 dark:text-gray-400 flex items-center justify-between">
-                            <span>${group.name}</span>
-                            ${window.viewMode === 'current' ? `<button onclick="openNotesModal('${group.unit || group.name}')" class="${noteColor} transition"><i class="fas fa-sticky-note"></i></button>` : ''}
-                        </td>
-                        <td class="p-3 text-right font-mono font-medium text-blue-700 dark:text-blue-400">
-                            $${group.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} 
-                            <span class="text-xs text-gray-400 ml-1">${rateLabel}</span>
-                        </td>
-                        <td class="p-3 text-center">
-                            <button onclick="toggleDetails('details-${safeKey}')" class="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 px-3 py-1 rounded-full">
-                                ${window.viewMode === 'global' ? 'Breakdown' : group.files.length + ' Files'} <i class="fas fa-chevron-down ml-1"></i>
-                            </button>
-                        </td>
-                    </tr>
-                    <tr id="details-${safeKey}" class="hidden bg-gray-50/50 dark:bg-gray-900/50">
-                        <td colspan="4" class="p-0"><div class="p-4 pl-12 border-l-4 border-blue-200 dark:border-blue-800">
-                            <ul class="space-y-2">
-                                ${group.files.map(f => `<li class="flex justify-between items-center text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700"><span class="text-gray-600 dark:text-gray-400 truncate max-w-[150px]">${f.filename}</span><div class="flex gap-2"><span class="font-mono text-gray-800 dark:text-gray-200">$${f.amount.toLocaleString('en-US',{minimumFractionDigits:2})}</span>${window.viewMode === 'current' ? `<button onclick="deleteFile('${f.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>` : ''}</div></li>`).join('')}
-                            </ul>
-                        </div></td>
-                    </tr>`;
+                        <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                            <td class="p-3 font-bold text-gray-800 dark:text-gray-200">${displayUnit}</td>
+                            <td class="p-3 text-gray-600 dark:text-gray-400 flex items-center justify-between">
+                                <span>${group.name}</span>
+                                ${viewMode === 'current' ? `
+                                <button onclick="openNotesModal('${group.unit || group.name}')" class="${noteColor} transition" title="Add/View Notes">
+                                    <i class="${noteIcon} text-lg"></i>
+                                </button>` : ''}
+                            </td>
+                            <td class="p-3 text-right font-mono font-medium text-blue-700 dark:text-blue-400">
+                                $${group.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} 
+                                <span class="text-xs text-gray-400 ml-1">${rateLabel}</span>
+                            </td>
+                            <td class="p-3 text-center">
+                                <button onclick="toggleDetails('details-${safeKey}')" class="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 px-3 py-1 rounded-full">
+                                    ${viewMode === 'global' ? 'Breakdown' : group.files.length + ' Files'} <i class="fas fa-chevron-down ml-1"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr id="details-${safeKey}" class="hidden bg-gray-50/50 dark:bg-gray-900/50">
+                            <td colspan="4" class="p-0">
+                                <div class="p-4 pl-12 border-l-4 border-blue-200 dark:border-blue-800">
+                                    <ul class="space-y-2">
+                                        ${group.files.map(f => `
+                                            <li class="flex justify-between items-center text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700">
+                                                <div class="flex items-center gap-3">
+                                                    <i class="far fa-file-pdf text-red-400"></i>
+                                                    <span class="text-gray-600 dark:text-gray-400 truncate max-w-[150px]">${f.filename}</span>
+                                                    <div class="flex gap-1">
+                                                        <button onclick="openEditModal('${f.id}', '${f.unit}')" class="text-gray-300 hover:text-blue-500 transition px-1"><i class="fas fa-pencil-alt text-xs"></i></button>
+                                                        <button onclick="deleteFile('${f.id}')" class="text-gray-300 hover:text-red-500 transition px-1"><i class="fas fa-trash-alt text-xs"></i></button>
+                                                    </div>
+                                                </div>
+                                                <span class="font-mono text-gray-800 dark:text-gray-200">$${f.amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
                 });
             };
 
             if (owners.length > 0) renderRows(owners);
+            
             if (drivers.length > 0) {
                 html += `<tr class="bg-gray-100 dark:bg-gray-700 font-bold text-gray-700 dark:text-gray-200"><td colspan="4" class="p-2 pl-4 text-xs uppercase tracking-wide">Company Drivers</td></tr>`;
                 renderRows(drivers);
             }
+
             tbody.innerHTML = html;
             grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2});
         }
@@ -734,6 +678,30 @@
             }
             doc.save("Report.pdf");
         };
+
+        // --- BACKUP/RESTORE ---
+        window.backupData = function() {
+            if(window.appData.length===0) return;
+            const blob = new Blob([JSON.stringify({ version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies },null,2)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `1099_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+        }
+        
+        window.restoreData = function(input) {
+            const file = input.files[0]; if(!file) return;
+            const r = new FileReader();
+            r.onload = e => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    if(Array.isArray(json)) { window.appData=json; window.unitNotes={}; } 
+                    else { window.appData=json.appData||[]; window.unitNotes=json.unitNotes||{}; window.knownCompanies=json.knownCompanies||["Default Company"]; }
+                    window.currentCompany = window.appData.length ? (window.appData[window.appData.length-1].company || window.knownCompanies[0]) : window.knownCompanies[0];
+                    updateCompanyDropdown(); renderTable();
+                } catch(err) { alert("Invalid backup."); }
+            };
+            r.readAsText(file); input.value='';
+        }
     </script>
 </body>
 </html>
