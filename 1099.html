@@ -39,35 +39,57 @@
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             
-            // --- ADMIN CHECK (FIXED) ---
+            // --- AUTH LOGIC ---
             if (localStorage.getItem('admin_mode') === 'true') {
-                // Ako je Admin, samo prikazi ime i NE radi nista drugo (nema redirect-a)
                 const userEl = document.getElementById('userName');
                 if (userEl) userEl.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
             } else {
-                // Ako NIJE Admin, onda trazi Google login
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         const rawName = user.email.split('@')[0];
                         const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
                         document.getElementById('userName').innerText = niceName;
                     } else {
-                        // Nije ulogovan i nije admin -> Izbaci napolje
-                        window.location.href = "index.html"; 
+                        goHome(); // Safe redirect
                     }
                 });
             }
 
             window.logout = function() {
                 localStorage.removeItem('my_access_key');
-                localStorage.removeItem('admin_mode'); // Brise admin status
+                localStorage.removeItem('admin_mode'); 
                 if (auth) {
-                    signOut(auth).then(() => window.location.href = "index.html").catch(() => window.location.href = "index.html");
+                    signOut(auth).then(() => goHome()).catch(() => goHome());
                 } else {
-                    window.location.href = "index.html";
+                    goHome();
                 }
             };
         } catch(e) { console.error(e); }
+
+        // --- SAFE REDIRECT HELPER ---
+        function goHome() {
+            try {
+                if (window.location.protocol !== 'blob:') {
+                    window.location.href = "index.html";
+                } else {
+                    throw new Error("Preview mode");
+                }
+            } catch (e) {
+                console.warn("Redirection blocked (preview mode). Showing fallback.");
+                document.body.innerHTML = `
+                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
+                        <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
+                            <i class="fas fa-lock text-4xl text-blue-600 mb-4"></i>
+                            <h1 class="text-2xl font-bold mb-2">Authentication Required</h1>
+                            <p class="text-gray-600 mb-6">You need to log in to access this tool.</p>
+                            <a href="index.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition inline-block">
+                                Go to Login Page
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+        }
 
         // Theme Logic
         const savedTheme = localStorage.getItem('theme');
@@ -335,7 +357,7 @@
         </div>
     </div>
 
-    <!-- SCRIPT (Existing Logic + Admin Fix) -->
+    <!-- SCRIPT -->
     <script>
         let appData = []; 
         let unitNotes = {}; 
@@ -346,10 +368,9 @@
         let currentCompany = "Default Company";
 
         function initApp() {
-            // Restore theme state for UI
             const savedTheme = localStorage.getItem('theme');
             if (savedTheme === 'dark') {
-                updateBulbIcon(true); // Sync icon
+                updateBulbIcon(true);
             }
             updateCompanyDropdown();
             renderTable();
@@ -448,7 +469,6 @@
                     const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
                     const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
                     
-                    // RATE LOGIC (Only for owners)
                     let rateLabel = "";
                     if (group.unit) {
                         if (group.unit.includes("287") || group.unit.includes("3781")) rateLabel = "(10%)";
@@ -552,7 +572,7 @@
             renderTable();
         }
 
-        // --- PDF EXTRACTION (Included fully) ---
+        // --- PDF EXTRACTION ---
         async function extractDataFromPDF(file) {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -560,7 +580,6 @@
             const viewport = page.getViewport({ scale: 1.0 });
             const textContent = await page.getTextContent();
             
-            // Critical: Right side only
             const rightSideBoundary = viewport.width * 0.4;
             const rightSideItems = textContent.items.filter(item => item.transform[4] > rightSideBoundary);
             rightSideItems.sort((a, b) => b.transform[5] - a.transform[5]);
@@ -577,14 +596,11 @@
             
             let unit = "Unknown", name = "Unknown", amount = 0.0;
 
-            // 1. Unit
             for(let l of textLines) {
                 const m = l.text.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
                 if(m) { let c = m[1].trim().split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim(); if(c) { unit = c; break; } }
             }
 
-            // 2. Name
-            // Owner Op (Below Unit)
             if(name === "Unknown") {
                 for(let i=0; i<textLines.length; i++) {
                     if(/\b(unit|truck)\b/i.test(textLines[i].text.toLowerCase())) {
@@ -598,7 +614,6 @@
                     if(name !== "Unknown") break;
                 }
             }
-            // Company Driver (Below STATEMENT)
             let isCompanyDriver = false;
             if(name === "Unknown") {
                 for(let i=0; i<textLines.length; i++) {
@@ -613,8 +628,7 @@
                     }
                 }
             }
-            if(isCompanyDriver) unit = ""; // Clear unit for drivers
-            // Fallback Name
+            if(isCompanyDriver) unit = ""; 
             if(name === "Unknown") {
                 for(let l of textLines) {
                     const m = l.text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
@@ -622,7 +636,6 @@
                 }
             }
 
-            // 3. Amount (Full text scan)
             const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
             let fullLines = [], cLine = [], lY = -1;
             fullItems.forEach(i => {
@@ -649,7 +662,6 @@
                      }
                 }
             } else {
-                // Owner Op (Trip Total)
                 let tf = false;
                 for(let l of fullLines) {
                     if(/trip/i.test(l)) tf=true;
@@ -688,7 +700,6 @@
             r.onload = e => {
                 try {
                     const json = JSON.parse(e.target.result);
-                    // Handle V1 or V2
                     if(Array.isArray(json)) { appData=json; unitNotes={}; const s=new Set(["Default Company"]); appData.forEach(d=>{if(d.company)s.add(d.company)}); knownCompanies=Array.from(s); }
                     else { appData=json.appData||[]; unitNotes=json.unitNotes||{}; knownCompanies=json.knownCompanies||["Default Company"]; }
                     if(appData.length) currentCompany = appData[appData.length-1].company || knownCompanies[0];
