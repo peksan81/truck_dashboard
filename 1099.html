@@ -24,7 +24,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        // REMOVED enableIndexedDbPersistence to fix lock issues
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
@@ -50,15 +51,7 @@
             const app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             db = getFirestore(app);
-            
-            // --- ENABLE OFFLINE PERSISTENCE (FIX FOR "CLIENT IS OFFLINE" ERROR) ---
-            enableIndexedDbPersistence(db).catch((err) => {
-                if (err.code == 'failed-precondition') {
-                    console.warn('Persistence failed: Multiple tabs open.');
-                } else if (err.code == 'unimplemented') {
-                    console.warn('Persistence failed: Browser not supported.');
-                }
-            });
+            // Persistence removed to prevent "Client Offline" loop on page navigation
 
             // --- AUTH CHECK ---
             if (localStorage.getItem('admin_mode') === 'true') {
@@ -153,7 +146,7 @@
 
             try {
                 const user = auth.currentUser;
-                // Force a check but allow cache
+                // Simple getDoc without persistence lock
                 const snap = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"));
                 
                 if(snap.exists()) {
@@ -175,7 +168,7 @@
                 } else { alert("No backup found in Cloud."); }
             } catch(e) { 
                 console.error(e);
-                alert("Cloud Error: " + e.message + "\n\nIf you have a .json file, use 'Restore' button instead."); 
+                alert("Cloud Error: " + e.message + "\n\nCheck your internet connection."); 
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
@@ -251,7 +244,7 @@
             renderTable();
         };
 
-        // --- PDF PARSING CORE ---
+        // --- PDF PARSING CORE (GEOMETRIC/SPATIAL APPROACH) ---
         async function extractDataFromPDF(file) {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -344,7 +337,9 @@
                 }
             }
 
-            if (isCompanyDriver) unit = ""; 
+            if (isCompanyDriver) {
+                unit = "";
+            }
 
             if (name === "Unknown") {
                 for (let i = 0; i < textLines.length; i++) {
@@ -358,18 +353,20 @@
 
             // 4. EXTRACT TOTAL
             const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
-            let fullLines = [], cLine = [], lY = -1;
+            let fullLines = [];
+            currentLine = [];
+            lastY = -1;
             fullItems.forEach(item => {
-                if (lY === -1 || Math.abs(item.transform[5] - lY) < 6) {
-                    cLine.push(item);
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) {
+                    currentLine.push(item);
                 } else {
-                    cLine.sort((a, b) => a.transform[4] - b.transform[4]);
-                    fullLines.push(cLine.map(i=>i.str).join(' '));
-                    cLine = [item];
+                    currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
+                    fullLines.push(currentLine.map(i=>i.str).join(' '));
+                    currentLine = [item];
                 }
                 lY = item.transform[5];
             });
-            if(cLine.length) fullLines.push(cLine.map(i=>i.str).join(' '));
+            if(currentLine.length) fullLines.push(currentLine.map(i=>i.str).join(' '));
 
             if (isCompanyDriver) {
                 let checkTotalFound = false;
@@ -380,6 +377,7 @@
                         if(m) { amount = parseFloat(m[1].replace(',','')); checkTotalFound=true; }
                     }
                 }
+                
                 if (!checkTotalFound) {
                      for(let i = fullLines.length - 1; i >= 0; i--) {
                          if(fullLines[i].toLowerCase().includes('total')) {
@@ -388,6 +386,7 @@
                          }
                      }
                 }
+
             } else {
                 let tripFound = false;
                 for(let l of fullLines) {
@@ -398,31 +397,43 @@
                         if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                     }
                 }
-                if(amount === 0) {
-                     for(let l of fullLines) {
-                         if(/total/i.test(l)) {
-                             const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
-                             if(m) { amount = parseFloat(m[1].replace(',','')); break; }
-                         }
-                     }
+                if (amount === 0) {
+                    for(let l of fullLines) {
+                        if(line.toLowerCase().includes('total')) {
+                            const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                            if(m) { amount = parseFloat(m[1].replace(',','')); break; }
+                        }
+                    }
                 }
             }
 
-            return { unit, name, amount, filename: file.name };
+            return {
+                unit: unit,
+                name: name,
+                amount: amount,
+                filename: file.name
+            };
         }
 
+        // --- RATE HELPER ---
         function getCommissionLabel(unitStr) {
-            if (!unitStr) return "";
-            if (unitStr.includes("287") || unitStr.includes("3781")) return "(10%)";
+            if (!unitStr) return ""; // Drivers don't have rate label
+            if (unitStr.includes("287") || unitStr.includes("3781")) {
+                return "(10%)";
+            }
             return "(12%)";
         }
 
-        window.renderTable = function() {
+        // --- Aggregation & Rendering ---
+
+        function renderTable() {
             const tbody = document.getElementById('dataTableBody');
             const footer = document.getElementById('tableFooter');
             const grandTotalEl = document.getElementById('grandTotal');
             
+            // 1. FILTER DATA
             let filteredData = [];
+
             if (viewMode === 'current') {
                 filteredData = appData.filter(item => item.company === currentCompany);
             } else {
@@ -439,7 +450,10 @@
             }
 
             footer.classList.remove('hidden');
+
+            // 2. AGGREGATE
             const aggregated = {};
+
             filteredData.forEach(item => {
                 let key = "";
                 if (item.unit && item.unit !== "Unknown") {
@@ -449,7 +463,12 @@
                 }
                 
                 if(!aggregated[key]) {
-                    aggregated[key] = { unit: item.unit, name: item.name, totalAmount: 0, files: [] };
+                    aggregated[key] = { 
+                        unit: item.unit, 
+                        name: item.name, 
+                        totalAmount: 0, 
+                        files: [] 
+                    };
                 }
                 
                 aggregated[key].totalAmount += item.amount;
@@ -460,13 +479,19 @@
                 }
             });
 
+            // Split into Owners and Drivers
             const owners = [];
             const drivers = [];
+
             Object.values(aggregated).forEach(item => {
-                if (item.unit && item.unit !== "") owners.push(item);
-                else drivers.push(item);
+                if (item.unit && item.unit !== "") {
+                    owners.push(item);
+                } else {
+                    drivers.push(item);
+                }
             });
 
+            // Sort logic
             const sortFn = (a, b) => {
                 if (a.unit && b.unit) {
                     const numA = parseInt(a.unit.replace(/\D/g,''));
@@ -479,18 +504,25 @@
             owners.sort(sortFn);
             drivers.sort(sortFn);
 
+            // 3. BUILD HTML
             let html = '';
             let totalSum = 0;
 
+            // Render Function
             const renderRows = (list) => {
                 list.forEach(group => {
                     totalSum += group.totalAmount;
-                    const safeKey = (group.unit || group.name).replace(/[^a-zA-Z0-9]/g, '_'); 
+                    const safeKey = group.unit ? group.unit.replace(/[^a-zA-Z0-9]/g, '_') : group.name.replace(/[^a-zA-Z0-9]/g, '_'); 
+
+                    // Resolve Note
                     const noteKey = `${currentCompany}_${group.unit || group.name}`;
                     const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
-                    const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
+                    const noteColor = hasNote ? "text-yellow-500 hover:text-yellow-600" : "text-gray-300 hover:text-gray-500";
+                    const noteIcon = hasNote ? "fas fa-sticky-note" : "far fa-sticky-note";
                     
                     const displayUnit = group.unit || "";
+                    
+                    // Determine Rate Label (Only for owners)
                     const rateLabel = group.unit ? getCommissionLabel(group.unit) : "";
 
                     html += `
@@ -523,8 +555,12 @@
                                                     <i class="far fa-file-pdf text-red-400"></i>
                                                     <span class="text-gray-600 dark:text-gray-400 truncate max-w-[150px]">${f.filename}</span>
                                                     <div class="flex gap-1">
-                                                        <button onclick="openEditModal('${f.id}', '${f.unit}')" class="text-gray-300 hover:text-blue-500 transition px-1"><i class="fas fa-pencil-alt text-xs"></i></button>
-                                                        <button onclick="deleteFile('${f.id}')" class="text-gray-300 hover:text-red-500 transition px-1"><i class="fas fa-trash-alt text-xs"></i></button>
+                                                        <button onclick="openEditModal('${f.id}', '${f.unit}')" class="text-gray-300 hover:text-blue-500 transition px-1" title="Edit Unit #">
+                                                            <i class="fas fa-pencil-alt text-xs"></i>
+                                                        </button>
+                                                        <button onclick="deleteFile('${f.id}')" class="text-gray-300 hover:text-red-500 transition px-1" title="Delete File">
+                                                            <i class="fas fa-trash-alt text-xs"></i>
+                                                        </button>
                                                     </div>
                                                 </div>
                                                 <span class="font-mono text-gray-800 dark:text-gray-200">$${f.amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
@@ -538,10 +574,15 @@
                 });
             };
 
-            if (owners.length > 0) renderRows(owners);
-            
+            // Render Owners
+            if (owners.length > 0) {
+                // html += `<tr class="bg-gray-100 font-bold text-gray-700"><td colspan="4" class="p-2 pl-4">OWNER OPERATORS</td></tr>`;
+                renderRows(owners);
+            }
+
+            // Render Drivers
             if (drivers.length > 0) {
-                html += `<tr class="bg-gray-100 dark:bg-gray-700 font-bold text-gray-700 dark:text-gray-200"><td colspan="4" class="p-2 pl-4 text-xs uppercase tracking-wide">Company Drivers</td></tr>`;
+                html += `<tr class="bg-gray-200 dark:bg-gray-700 font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider"><td colspan="4" class="p-3 pl-4 border-t-2 border-gray-300 dark:border-gray-600">DRIVERS</td></tr>`;
                 renderRows(drivers);
             }
 
@@ -549,11 +590,328 @@
             grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2});
         }
 
+        // --- Interaction Helpers --- (Same as before)
+        function toggleDetails(rowId) {
+            const el = document.getElementById(rowId);
+            if(el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                el.classList.add('fade-in');
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+        function deleteFile(id) {
+            fileToDeleteId = id;
+            document.getElementById('deleteFileModal').classList.remove('hidden');
+        }
+        function closeDeleteFileModal() {
+            document.getElementById('deleteFileModal').classList.add('hidden');
+            fileToDeleteId = null;
+        }
+        function confirmDeleteFile() {
+            if (fileToDeleteId) {
+                appData = appData.filter(d => d.id !== fileToDeleteId);
+                renderTable();
+                closeDeleteFileModal();
+            }
+        }
+        let currentEditId = null;
+        function openEditModal(fileId, currentUnit) {
+            currentEditId = fileId;
+            const input = document.getElementById('editUnitInput');
+            input.value = currentUnit;
+            document.getElementById('editModal').classList.remove('hidden');
+            input.focus();
+        }
+        function closeEditModal() {
+            document.getElementById('editModal').classList.add('hidden');
+            currentEditId = null;
+        }
+        function saveUnitEdit() {
+            const newUnit = document.getElementById('editUnitInput').value.trim();
+            if(!newUnit) return;
+            const item = appData.find(d => d.id === currentEditId);
+            if(item) {
+                item.unit = newUnit;
+                renderTable();
+                closeEditModal();
+            }
+        }
+        function openNotesModal(unitKey) {
+            const key = `${currentCompany}_${unitKey}`;
+            document.getElementById('noteUnitDisplay').innerText = unitKey;
+            document.getElementById('noteKey').value = key;
+            document.getElementById('noteInput').value = unitNotes[key] || "";
+            document.getElementById('notesModal').classList.remove('hidden');
+            document.getElementById('noteInput').focus();
+        }
+        function closeNotesModal() {
+            document.getElementById('notesModal').classList.add('hidden');
+        }
+        function saveNote() {
+            const key = document.getElementById('noteKey').value;
+            const val = document.getElementById('noteInput').value;
+            unitNotes[key] = val;
+            renderTable();
+            closeNotesModal();
+        }
+        function openClearModal() {
+            document.getElementById('clearModal').classList.remove('hidden');
+        }
+        function closeClearModal() {
+            document.getElementById('clearModal').classList.add('hidden');
+        }
+        function confirmClear() {
+            if (viewMode === 'global') {
+                appData = [];
+                unitNotes = {};
+                knownCompanies = ["Default Company"];
+                currentCompany = "Default Company";
+            } else {
+                appData = appData.filter(item => item.company !== currentCompany);
+            }
+            renderTable();
+            closeClearModal();
+        }
+        function backupData() {
+            if(appData.length === 0) return;
+            const backupPayload = {
+                version: 2,
+                appData: appData,
+                unitNotes: unitNotes,
+                knownCompanies: knownCompanies
+            };
+            const dataStr = JSON.stringify(backupPayload, null, 2);
+            const blob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            // Generate filename with date and time (YYYY-MM-DD_HH-MM-SS)
+            const now = new Date();
+            const dateStr = now.getFullYear() + '-' + 
+                           String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                           String(now.getDate()).padStart(2, '0') + '_' + 
+                           String(now.getHours()).padStart(2, '0') + '-' + 
+                           String(now.getMinutes()).padStart(2, '0') + '-' + 
+                           String(now.getSeconds()).padStart(2, '0');
+            
+            a.href = url;
+            a.download = `1099_manager_backup_${dateStr}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        function restoreData(input) {
+            const file = input.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    restoreCandidate = json;
+                    document.getElementById('restoreModal').classList.remove('hidden');
+                } catch(err) {
+                    console.error("Error reading backup file", err);
+                    alert("Invalid backup file.");
+                }
+            };
+            reader.readAsText(file);
+            input.value = ''; 
+        }
+        function closeRestoreModal() {
+            document.getElementById('restoreModal').classList.add('hidden');
+            restoreCandidate = null;
+        }
+        function confirmRestore() {
+            if (restoreCandidate) {
+                if(Array.isArray(restoreCandidate)) {
+                    appData = restoreCandidate;
+                    unitNotes = {}; 
+                    const companies = new Set(["Default Company"]);
+                    appData.forEach(d => { if(d.company) companies.add(d.company); });
+                    knownCompanies = Array.from(companies);
+                } else {
+                    appData = restoreCandidate.appData || [];
+                    unitNotes = restoreCandidate.unitNotes || {};
+                    knownCompanies = restoreCandidate.knownCompanies || ["Default Company"];
+                }
+                if(appData.length > 0 && appData[appData.length-1].company) {
+                    currentCompany = appData[appData.length-1].company;
+                } else {
+                    currentCompany = knownCompanies[0];
+                }
+                updateCompanyDropdown();
+                renderTable();
+                closeRestoreModal();
+            }
+        }
+
+        // --- PDF Report ---
+        function printReport() {
+            const tbody = document.getElementById('dataTableBody');
+            if(tbody.innerText.includes("No data")) return;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            const title = viewMode === 'current' 
+                ? `Settlement Report: ${currentCompany}`
+                : "Global Yearly Settlement Report";
+
+            doc.setFontSize(16);
+            doc.text(title, 14, 20);
+            doc.setFontSize(10);
+            doc.text("Generated: " + new Date().toLocaleString(), 14, 28);
+
+            let filteredData = [];
+            if (viewMode === 'current') {
+                filteredData = appData.filter(item => item.company === currentCompany);
+            } else {
+                filteredData = appData;
+            }
+
+            const aggregated = {};
+            filteredData.forEach(item => {
+                let key = "";
+                if (item.unit && item.unit !== "Unknown") {
+                    key = item.unit.toUpperCase();
+                } else {
+                    key = item.name.toUpperCase();
+                }
+                if(!aggregated[key]) {
+                    aggregated[key] = { unit: item.unit, name: item.name, total: 0 };
+                }
+                aggregated[key].total += item.amount;
+                if(aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
+            });
+
+            // Split
+            const owners = [];
+            const drivers = [];
+            Object.values(aggregated).forEach(item => {
+                if(item.unit && item.unit !== "") owners.push(item);
+                else drivers.push(item);
+            });
+
+            // Sort
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) {
+                    const numA = parseInt(a.unit.replace(/\D/g,''));
+                    const numB = parseInt(b.unit.replace(/\D/g,''));
+                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                }
+                return (a.name || "").localeCompare(b.name || "");
+            };
+            owners.sort(sortFn);
+            drivers.sort(sortFn);
+
+            let finalY = 35;
+
+            // 1. OWNER TABLE
+            if(owners.length > 0) {
+                const ownerRows = owners.map(row => {
+                    let nameDisplay = row.name;
+                    if(viewMode === 'current') {
+                        const noteKey = `${currentCompany}_${row.unit}`;
+                        if(unitNotes[noteKey]) nameDisplay += ` (Note: ${unitNotes[noteKey]})`;
+                    }
+                    const rateLabel = getCommissionLabel(row.unit);
+                    return [
+                        row.unit,
+                        nameDisplay,
+                        "$" + row.total.toLocaleString('en-US', {minimumFractionDigits: 2}) + " " + rateLabel
+                    ];
+                });
+
+                // Add Owner Total
+                const ownerSum = owners.reduce((acc, curr) => acc + curr.total, 0);
+                ownerRows.push(["", "TOTAL OWNERS", "$" + ownerSum.toLocaleString('en-US', {minimumFractionDigits: 2})]);
+
+                doc.autoTable({
+                    head: [['Unit #', 'Driver Name / Notes', 'After Commission']],
+                    body: ownerRows,
+                    startY: finalY,
+                    theme: 'grid',
+                    headStyles: { fillColor: viewMode === 'current' ? [41, 128, 185] : [46, 204, 113] },
+                    columnStyles: { 2: { halign: 'right' } },
+                    didParseCell: function(data) {
+                        if (data.row.index === ownerRows.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                    }
+                });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            // 2. DRIVER TABLE (No Unit, No Commission Label)
+            if(drivers.length > 0) {
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'bold');
+                doc.text("DRIVERS", 14, finalY);
+                finalY += 5;
+
+                const driverRows = drivers.map(row => {
+                    let nameDisplay = row.name;
+                    if(viewMode === 'current') {
+                        const noteKey = `${currentCompany}_${row.name}`;
+                        if(unitNotes[noteKey]) nameDisplay += ` (Note: ${unitNotes[noteKey]})`;
+                    }
+                    return [
+                        nameDisplay,
+                        "$" + row.total.toLocaleString('en-US', {minimumFractionDigits: 2})
+                    ];
+                });
+
+                const driverSum = drivers.reduce((acc, curr) => acc + curr.total, 0);
+                driverRows.push(["TOTAL DRIVERS", "$" + driverSum.toLocaleString('en-US', {minimumFractionDigits: 2})]);
+
+                doc.autoTable({
+                    head: [['Driver Name / Notes', 'Total Pay']],
+                    body: driverRows,
+                    startY: finalY,
+                    theme: 'grid',
+                    headStyles: { fillColor: [100, 100, 100] }, // Different color for drivers?
+                    columnStyles: { 1: { halign: 'right' } },
+                    didParseCell: function(data) {
+                        if (data.row.index === driverRows.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                    }
+                });
+                finalY = doc.lastAutoTable.finalY + 15;
+            }
+
+            // Optional Grand Total
+            const totalSum = filteredData.reduce((acc, curr) => acc + curr.amount, 0);
+            
+            // Only show Grand Total if we had both sections, otherwise the specific total is enough
+            if(owners.length > 0 && drivers.length > 0) {
+                doc.setFontSize(12);
+                // Calculate right alignment position (Page Width - Margin)
+                const pageWidth = doc.internal.pageSize.getWidth();
+                doc.text(
+                    "GRAND TOTAL: $" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2}), 
+                    pageWidth - 14, 
+                    finalY, 
+                    { align: 'right' }
+                );
+            }
+
+            doc.save("Settlement_Report.pdf");
+        }
+
         window.toggleTheme = function() {
             const html = document.documentElement;
-            const isDark = html.classList.toggle('dark');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
-            updateBulbIcon(isDark);
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                updateBulbIcon(false);
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                updateBulbIcon(true);
+            }
         };
 
         function updateBulbIcon(isDark) {
@@ -569,138 +927,6 @@
                     bulb.style.filter = "none";
                 }
             }
-        }
-
-        window.updateCompanyDropdown = function() {
-            const select = document.getElementById('companySelect');
-            select.innerHTML = '';
-            window.knownCompanies.forEach(comp => {
-                const option = document.createElement('option');
-                option.value = comp;
-                option.text = comp;
-                if(comp === window.currentCompany) option.selected = true;
-                select.appendChild(option);
-            });
-            document.getElementById('uploadTargetCompany').innerText = window.currentCompany;
-        };
-
-        window.switchCompany = function(newCompany) {
-            window.currentCompany = newCompany;
-            updateCompanyDropdown();
-            renderTable();
-        };
-
-        window.openNewCompanyModal = function() { document.getElementById('newCompanyModal').classList.remove('hidden'); }
-        window.closeNewCompanyModal = function() { document.getElementById('newCompanyModal').classList.add('hidden'); }
-        window.confirmNewCompany = function() {
-            const n = document.getElementById('newCompanyName').value.trim();
-            if(n && !window.knownCompanies.includes(n)) { window.knownCompanies.push(n); window.currentCompany=n; updateCompanyDropdown(); renderTable(); closeNewCompanyModal(); }
-        };
-        
-        window.switchView = function(m) {
-            window.viewMode = m;
-            const btnCurrent = document.getElementById('btnViewCurrent');
-            const btnGlobal = document.getElementById('btnViewGlobal');
-            const overlay = document.getElementById('globalOverlay');
-            const title = document.getElementById('reportTitle');
-            
-            const activeClass = ['bg-white', 'dark:bg-gray-700', 'text-blue-600', 'dark:text-blue-400', 'shadow-sm'];
-            const inactiveClass = ['text-gray-500', 'dark:text-gray-400'];
-
-            if (m === 'current') {
-                btnCurrent.classList.add(...activeClass); btnCurrent.classList.remove(...inactiveClass);
-                btnGlobal.classList.remove(...activeClass); btnGlobal.classList.add(...inactiveClass);
-                overlay.classList.add('hidden');
-                title.innerText = `${window.currentCompany} Report`;
-            } else {
-                btnGlobal.classList.add(...activeClass); btnGlobal.classList.remove(...inactiveClass);
-                btnCurrent.classList.remove(...activeClass); btnCurrent.classList.add(...inactiveClass);
-                overlay.classList.remove('hidden');
-                title.innerText = "Global / Yearly Report";
-            }
-            renderTable();
-        };
-
-        // Modal Helpers
-        window.toggleDetails = function(id) { document.getElementById(id).classList.toggle('hidden'); }
-        window.openNotesModal = function(k) { document.getElementById('noteUnitDisplay').innerText=k; document.getElementById('noteKey').value=`${window.currentCompany}_${k}`; document.getElementById('noteInput').value=window.unitNotes[`${window.currentCompany}_${k}`]||""; document.getElementById('notesModal').classList.remove('hidden'); }
-        window.closeNotesModal = function() { document.getElementById('notesModal').classList.add('hidden'); }
-        window.saveNote = function() { window.unitNotes[document.getElementById('noteKey').value] = document.getElementById('noteInput').value; closeNotesModal(); renderTable(); }
-        window.openClearModal = function() { document.getElementById('clearModal').classList.remove('hidden'); }
-        window.closeClearModal = function() { document.getElementById('clearModal').classList.add('hidden'); }
-        window.confirmClear = function() { if(window.viewMode==='global') { window.appData=[]; window.unitNotes={}; window.knownCompanies=["Default Company"]; window.currentCompany="Default Company"; } else { window.appData=window.appData.filter(i=>i.company!==window.currentCompany); } renderTable(); closeClearModal(); }
-        window.deleteFile = function(id) { window.fileToDeleteId=id; document.getElementById('deleteFileModal').classList.remove('hidden'); }
-        window.closeDeleteFileModal = function() { document.getElementById('deleteFileModal').classList.add('hidden'); }
-        window.confirmDeleteFile = function() { if(window.fileToDeleteId){ window.appData=window.appData.filter(d=>d.id!==window.fileToDeleteId); renderTable(); closeDeleteFileModal(); } }
-        window.openEditModal = function(id, unit) { document.getElementById('editUnitInput').value=unit; document.getElementById('editFileIndex').value=id; document.getElementById('editModal').classList.remove('hidden'); }
-        window.closeEditModal = function() { document.getElementById('editModal').classList.add('hidden'); }
-        window.saveUnitEdit = function() { const newUnit=document.getElementById('editUnitInput').value.trim(); const id=document.getElementById('editFileIndex').value; if(newUnit && id) { const item=window.appData.find(d=>d.id===id); if(item){ item.unit=newUnit; renderTable(); closeEditModal(); } } }
-
-        // PDF Print
-        window.printReport = function() {
-            const tbody = document.getElementById('dataTableBody');
-            if(tbody.innerText.includes("No data")) return;
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            doc.setFontSize(16); doc.text(window.viewMode==='current'?`Settlement Report: ${window.currentCompany}`:"Global Yearly Settlement Report",14,20);
-            doc.setFontSize(10); doc.text("Generated: " + new Date().toLocaleString(), 14, 28);
-            
-            let filteredData = (window.viewMode === 'current') ? window.appData.filter(i => i.company === window.currentCompany) : window.appData;
-            const agg = {};
-            filteredData.forEach(item => {
-                let k = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
-                if(!agg[k]) agg[k]={unit:item.unit,name:item.name,total:0};
-                agg[k].total+=item.amount;
-                if(agg[k].name==="Unknown"&&item.name!=="Unknown") agg[k].name=item.name;
-            });
-            const own=[], drv=[];
-            Object.values(agg).forEach(i=>(i.unit&&i.unit!=="")?own.push(i):drv.push(i));
-            const sortFn = (a,b) => { if(a.unit&&b.unit){const nA=parseInt(a.unit.replace(/\D/g,'')),nB=parseInt(b.unit.replace(/\D/g,''));if(!isNaN(nA)&&!isNaN(nB))return nA-nB;} return (a.name||"").localeCompare(b.name||""); };
-            own.sort(sortFn); drv.sort(sortFn);
-
-            let y=35;
-            if(own.length) {
-                const rows = own.map(r=>[r.unit, r.name, `$${r.total.toLocaleString('en-US',{minimumFractionDigits:2})} ${getCommissionLabel(r.unit)}`]);
-                rows.push(["","TOTAL OWNERS", `$${own.reduce((a,c)=>a+c.total,0).toLocaleString('en-US',{minimumFractionDigits:2})}`]);
-                doc.autoTable({head:[['Unit','Name','After Commission']], body:rows, startY:y, columnStyles:{2:{halign:'right'}}});
-                y = doc.lastAutoTable.finalY + 15;
-            }
-            if(drv.length) {
-                doc.text("DRIVERS", 14, y); y+=5;
-                const rows = drv.map(r=>[r.name, `$${r.total.toLocaleString('en-US',{minimumFractionDigits:2})}`]);
-                rows.push(["TOTAL DRIVERS", `$${drv.reduce((a,c)=>a+c.total,0).toLocaleString('en-US',{minimumFractionDigits:2})}`]);
-                doc.autoTable({head:[['Name','Total Pay']], body:rows, startY:y, columnStyles:{1:{halign:'right'}}});
-                y = doc.lastAutoTable.finalY + 15;
-            }
-            const total = filteredData.reduce((a,c)=>a+c.amount,0);
-            if(own.length && drv.length) {
-                doc.text("GRAND TOTAL: $"+total.toLocaleString('en-US',{minimumFractionDigits:2}), doc.internal.pageSize.getWidth()-14, y, {align:'right'});
-            }
-            doc.save("Report.pdf");
-        };
-
-        // --- BACKUP/RESTORE ---
-        window.backupData = function() {
-            if(window.appData.length===0) return;
-            const blob = new Blob([JSON.stringify({ version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies },null,2)], {type: "application/json"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = `1099_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
-        }
-        
-        window.restoreData = function(input) {
-            const file = input.files[0]; if(!file) return;
-            const r = new FileReader();
-            r.onload = e => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    if(Array.isArray(json)) { window.appData=json; window.unitNotes={}; } 
-                    else { window.appData=json.appData||[]; window.unitNotes=json.unitNotes||{}; window.knownCompanies=json.knownCompanies||["Default Company"]; }
-                    window.currentCompany = window.appData.length ? (window.appData[window.appData.length-1].company || window.knownCompanies[0]) : window.knownCompanies[0];
-                    updateCompanyDropdown(); renderTable();
-                } catch(err) { alert("Invalid backup."); }
-            };
-            r.readAsText(file); input.value='';
         }
     </script>
 </body>
