@@ -33,22 +33,26 @@
 
         // Main Function
         async function initDashboard() {
-            // --- 1. ADMIN CHECK ---
+            // --- 1. ADMIN CHECK (CRITICAL FIX) ---
+            // If Admin Mode is active, show Admin UI and STOP further checks (prevents redirect loop)
             if (localStorage.getItem('admin_mode') === 'true') {
                 const userEl = document.getElementById('userName');
                 if (userEl) {
                     userEl.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
                 }
+                
                 const adminIcon = document.getElementById('adminIcon');
                 if (adminIcon) adminIcon.classList.remove('hidden');
-                
-                // Stop here if admin (bypass other checks)
+
+                // Reveal content immediately
+                document.getElementById('mainContent').classList.remove('opacity-0');
                 return; 
             }
 
             // --- 2. NORMAL USER CHECKS ---
             const key = localStorage.getItem('my_access_key');
             
+            // If no key (and not admin), kick out
             if (!key) {
                 goHome();
                 return;
@@ -62,14 +66,20 @@
                         const el = document.getElementById('userName');
                         if (el) el.innerText = niceName;
                         
+                        // Show content
+                        document.getElementById('mainContent').classList.remove('opacity-0');
+                        
+                        // Check key validity in background
                         validateSession(key); 
                     } else {
+                        // Not logged in
                         goHome();
                     }
                 });
             } else {
-                const el = document.getElementById('userName');
-                if (el) el.innerText = "User";
+                // Fallback display
+                document.getElementById('userName').innerText = "User";
+                document.getElementById('mainContent').classList.remove('opacity-0');
             }
         }
 
@@ -87,8 +97,7 @@
         
         window.logout = function() {
             localStorage.removeItem('my_access_key');
-            localStorage.removeItem('admin_mode'); 
-            
+            localStorage.removeItem('admin_mode'); // Clear admin status
             if (auth) {
                 signOut(auth).then(() => goHome()).catch(() => goHome());
             } else {
@@ -151,6 +160,7 @@
             updateBulbIcon(true);
         }
 
+        // Start App
         initDashboard();
     </script>
     
@@ -161,7 +171,7 @@
         body, .tool-card, nav { transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
     </style>
 </head>
-<body class="flex flex-col min-h-screen text-gray-800 bg-gray-50 font-sans dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300">
+<body class="flex flex-col min-h-screen text-gray-800 font-sans bg-gray-50 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300">
 
     <!-- Navbar -->
     <nav class="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-50 transition-colors duration-300">
@@ -191,8 +201,8 @@
         </div>
     </nav>
 
-    <!-- Main Content -->
-    <main class="flex-grow container mx-auto px-4 py-12">
+    <!-- Main Content (Hidden initially to prevent flicker) -->
+    <main id="mainContent" class="flex-grow container mx-auto px-4 py-12 opacity-0 transition-opacity duration-300">
         
         <div class="text-center mb-12">
             <h1 class="text-4xl font-extrabold text-gray-800 dark:text-white mb-4">Welcome Back!</h1>
