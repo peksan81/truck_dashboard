@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Tools Hub</title>
+    <title>Secure Access</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // 1. SETTINGS
+        // SETTINGS
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -21,182 +21,119 @@
             appId: "1:594927367199:web:4f3c5af05f4cfdb482112a",
             measurementId: "G-42RMFB41Q2"
         };
-
         const SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAm91gXdGCdRPw3FLR9Gji5VBr1fCyg2kVIt9kv0wiDYQ7GdMwv9iQxMLsfOnvQKqq/exec";
 
-        // Firebase Initialization
-        let app, auth;
+        let app, auth, provider;
         try {
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
-        } catch(e) { console.error("Firebase error", e); }
+            provider = new GoogleAuthProvider();
+            setPersistence(auth, browserLocalPersistence);
+        } catch (e) { console.error(e); }
 
-        // Main Function
-        async function initDashboard() {
-            const key = localStorage.getItem('my_access_key');
-            
-            // 1. Quick key check
-            if (!key) {
-                goHome();
-                return;
-            }
+        // --- LOGIC ---
+        window.checkGateCode = async function() {
+            const btn = document.getElementById('verifyBtn');
+            const key = document.getElementById('gateInput').value.trim();
+            if (!key) return;
 
-            // 2. Google Session Check and Name Display
-            if (auth) {
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        // Extract name
-                        const rawName = user.email.split('@')[0];
-                        const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-                        const el = document.getElementById('userName');
-                        if (el) el.innerText = niceName;
-                        
-                        // Validate key in DB
-                        validateSession(key); 
-                    } else {
-                        // Not logged in
-                        goHome();
-                    }
-                });
-            } else {
-                const el = document.getElementById('userName');
-                if (el) el.innerText = "User";
-            }
-        }
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
 
-        async function validateSession(key) {
-            if (!SHEET_API_URL) return;
             try {
                 const response = await fetch(`${SHEET_API_URL}?action=verify&key=${encodeURIComponent(key)}`);
                 const data = await response.json();
-                if (data.status !== 'allowed') {
-                    alert("Access key has expired or is banned.");
-                    logout();
-                }
-            } catch (e) { console.error("Offline check", e); }
-        }
-        
-        window.logout = function() {
-            localStorage.removeItem('my_access_key');
-            if (auth) {
-                signOut(auth).then(() => goHome()).catch(() => goHome());
-            } else {
-                goHome();
-            }
-        };
 
-        function goHome() {
-            try {
-                // Pokusaj redirekcije na index.html
-                // Provera da li je URL validan pre redirekcije
-                if (window.location.protocol !== 'blob:') {
-                    window.location.href = "index.html";
+                if (data.status === 'allowed') {
+                    localStorage.setItem('my_access_key', key);
+                    // If google is ready, go to dashboard, else show google button
+                    if (auth.currentUser) {
+                        registerUserInDb(key, auth.currentUser.email);
+                        window.location.href = "dashboard.html";
+                    } else {
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step2').classList.remove('hidden');
+                    }
                 } else {
-                    throw new Error("Preview mode");
+                    alert("Access Denied: " + (data.message || "Invalid Key"));
                 }
             } catch (e) {
-                console.warn("Redirection blocked (preview mode). Showing fallback.");
-                // Fallback UI ako redirekcija ne uspe
-                document.body.innerHTML = `
-                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
-                        <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
-                            <i class="fas fa-lock text-4xl text-blue-600 mb-4"></i>
-                            <h1 class="text-2xl font-bold mb-2">Authentication Required</h1>
-                            <p class="text-gray-600 mb-6">You need to log in to access this dashboard.</p>
-                            <a href="index.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition inline-block">
-                                Go to Login Page
-                            </a>
-                        </div>
-                    </div>
-                `;
+                alert("Connection Error. Please check your internet.");
             }
+            btn.disabled = false;
+            btn.innerText = 'Verify';
+        };
+
+        window.loginWithGoogle = function() {
+            signInWithPopup(auth, provider).then((result) => {
+                const key = localStorage.getItem('my_access_key');
+                registerUserInDb(key, result.user.email);
+                window.location.href = "dashboard.html";
+            }).catch(e => alert(e.message));
+        };
+
+        function registerUserInDb(key, email) {
+            fetch(`${SHEET_API_URL}?action=register_user&key=${key}&user=${email}`, { method: "POST", mode: "no-cors" });
         }
 
-        initDashboard();
+        // Auto-redirect if already logged in
+        if(auth) {
+            onAuthStateChanged(auth, (user) => {
+                const key = localStorage.getItem('my_access_key');
+                if (user && key) {
+                    // Quick check - redirect immediately
+                    window.location.href = "dashboard.html";
+                } else {
+                    document.getElementById('loader').classList.add('hidden');
+                    document.getElementById('loginBox').classList.remove('hidden');
+                    
+                    if (key) {
+                         document.getElementById('step1').classList.add('hidden');
+                         document.getElementById('step2').classList.remove('hidden');
+                    }
+                }
+            });
+        }
     </script>
 </head>
-<body class="flex flex-col min-h-screen text-gray-800 font-sans bg-gray-50">
+<body class="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
 
-    <!-- Navbar -->
-    <nav class="bg-white shadow-sm p-4 sticky top-0 z-50">
-        <div class="container mx-auto flex justify-between items-center">
-            <div class="font-bold text-xl text-gray-700 flex items-center">
-                <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
-            </div>
-            
-            <div class="flex items-center gap-4">
-                <!-- User Info -->
-                <div class="hidden md:flex items-center text-sm font-medium text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">
-                    <i class="fas fa-user-circle text-blue-500 mr-2 text-lg"></i>
-                    <span id="userName">Loading...</span>
-                </div>
+    <!-- Loader -->
+    <div id="loader" class="text-white text-center">
+        <i class="fas fa-circle-notch fa-spin text-4xl mb-4"></i>
+        <p>Checking security...</p>
+    </div>
 
-                <!-- Logout Button -->
-                <button onclick="logout()" class="text-xs font-bold text-red-500 hover:text-white border border-red-200 hover:bg-red-500 px-4 py-2 rounded-lg transition shadow-sm flex items-center">
-                    <i class="fas fa-sign-out-alt mr-2"></i> Log Out
-                </button>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Main Content -->
-    <main class="flex-grow container mx-auto px-4 py-12">
+    <!-- Login Box -->
+    <div id="loginBox" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md hidden">
         
-        <div class="text-center mb-12">
-            <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Welcome Back!</h1>
-            <p class="text-lg text-gray-600">All your tools in one place.</p>
+        <!-- Step 1: Code -->
+        <div id="step1">
+            <div class="text-center mb-6">
+                <i class="fas fa-shield-alt text-4xl text-blue-600 mb-2"></i>
+                <h1 class="text-2xl font-bold text-gray-800">Secure Entry</h1>
+                <p class="text-gray-500 text-sm">Please enter access key</p>
+            </div>
+            <form onsubmit="event.preventDefault(); checkGateCode();" class="space-y-4">
+                <input type="password" id="gateInput" class="w-full border-2 border-gray-200 rounded-lg p-3 text-center text-xl tracking-widest focus:border-blue-500 outline-none" placeholder="••••••••" autofocus>
+                <button type="submit" id="verifyBtn" class="w-full bg-gray-900 hover:bg-black text-white py-3 rounded-lg font-bold transition">Verify</button>
+            </form>
         </div>
 
-        <!-- Tool Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            
-            <!-- TOOL 1: 1099 Manager -->
-            <a href="1099.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-blue-500 transition hover:-translate-y-1 block relative">
-                <div class="bg-blue-600 p-6 flex justify-center items-center h-40">
-                    <i class="fas fa-truck-moving text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
-                </div>
-                <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">1099 Manager</h3>
-                    <p class="text-gray-500 text-sm mb-4">Settlement calculation, PDF analysis, and driver reports.</p>
-                    <div class="flex items-center text-blue-600 font-bold text-sm uppercase tracking-wide">
-                        Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
-                    </div>
-                </div>
-            </a>
-            
-            <!-- TOOL 2: Payroll -->
-            <a href="plate.html" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-green-500 transition hover:-translate-y-1 block relative">
-                <div class="bg-green-600 p-6 flex justify-center items-center h-40">
-                    <i class="fas fa-money-check-alt text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
-                </div>
-                <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">Payroll</h3>
-                    <p class="text-gray-500 text-sm mb-4">Calculator for salaries, bonuses, and employee deductions.</p>
-                    <div class="flex items-center text-green-600 font-bold text-sm uppercase tracking-wide">
-                        Open Tool <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition"></i>
-                    </div>
-                </div>
-            </a>
-            
-            <!-- TOOL 3: Notes -->
-            <a href="#" onclick="alert('Coming soon!')" class="tool-card bg-white rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative grayscale opacity-75 hover:grayscale-0 hover:opacity-100">
-                <div class="bg-yellow-500 p-6 flex justify-center items-center h-40">
-                    <i class="fas fa-sticky-note text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
-                </div>
-                <div class="p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-2">Notes</h3>
-                    <p class="text-gray-500 text-sm mb-4">Quick reminders and important information.</p>
-                    <div class="flex items-center text-yellow-600 font-bold text-sm uppercase tracking-wide">
-                        Coming soon...
-                    </div>
-                </div>
-            </a>
-
+        <!-- Step 2: Google -->
+        <div id="step2" class="hidden text-center">
+             <div class="text-center mb-6">
+                <i class="fab fa-google text-4xl text-blue-600 mb-2"></i>
+                <h1 class="text-2xl font-bold text-gray-800">Verify Identity</h1>
+                <p class="text-gray-500 text-sm mb-4">Key accepted. Verify with Google.</p>
+            </div>
+            <button onclick="loginWithGoogle()" class="w-full border border-gray-300 py-3 rounded-lg font-bold hover:bg-gray-50 flex items-center justify-center gap-2 mb-4">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5"> Sign in with Google
+            </button>
+            <button onclick="localStorage.removeItem('my_access_key'); location.reload()" class="text-xs text-gray-400 underline hover:text-gray-600">Change Key</button>
         </div>
-    </main>
-    
-    <footer class="text-center text-gray-400 text-sm py-8 border-t border-gray-200 mt-auto">
-        &copy; 2026 My Tools Hub. All rights reserved.
-    </footer>
+
+    </div>
+
 </body>
 </html>
