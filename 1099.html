@@ -198,6 +198,44 @@
             renderTable();
         };
 
+        function updateCompanyDropdown() {
+            const select = document.getElementById('companySelect');
+            if (!select) return;
+
+            select.innerHTML = '';
+            knownCompanies.forEach(company => {
+                const option = document.createElement('option');
+                option.value = company;
+                option.textContent = company;
+                select.appendChild(option);
+            });
+
+            if (!knownCompanies.includes(currentCompany)) {
+                currentCompany = knownCompanies[0] || "Default Company";
+            }
+            select.value = currentCompany;
+        }
+
+        window.setViewMode = function(mode) {
+            viewMode = mode;
+            const currentBtn = document.getElementById('viewCurrentBtn');
+            const globalBtn = document.getElementById('viewGlobalBtn');
+            if (currentBtn && globalBtn) {
+                if (mode === 'current') {
+                    currentBtn.classList.add('bg-indigo-600', 'text-white');
+                    currentBtn.classList.remove('bg-gray-200', 'text-gray-700');
+                    globalBtn.classList.add('bg-gray-200', 'text-gray-700');
+                    globalBtn.classList.remove('bg-green-600', 'text-white');
+                } else {
+                    globalBtn.classList.add('bg-green-600', 'text-white');
+                    globalBtn.classList.remove('bg-gray-200', 'text-gray-700');
+                    currentBtn.classList.add('bg-gray-200', 'text-gray-700');
+                    currentBtn.classList.remove('bg-indigo-600', 'text-white');
+                }
+            }
+            renderTable();
+        };
+
         function preventDefaults(e){ e.preventDefault(); e.stopPropagation(); }
         function handleDrop(e){ window.handleFiles(e.dataTransfer.files); }
 
@@ -364,7 +402,7 @@
                     fullLines.push(currentLine.map(i=>i.str).join(' '));
                     currentLine = [item];
                 }
-                lY = item.transform[5];
+                lastY = item.transform[5];
             });
             if(currentLine.length) fullLines.push(currentLine.map(i=>i.str).join(' '));
 
@@ -399,7 +437,7 @@
                 }
                 if (amount === 0) {
                     for(let l of fullLines) {
-                        if(line.toLowerCase().includes('total')) {
+                        if(l.toLowerCase().includes('total')) {
                             const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                             if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                         }
@@ -928,6 +966,163 @@
                 }
             }
         }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.initApp) {
+                window.initApp();
+            }
+        });
     </script>
+</head>
+<body class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div class="max-w-6xl mx-auto px-4 py-6">
+        <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+                <h1 class="text-2xl font-bold">1099 Manager</h1>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Upload settlement PDFs and track totals by unit.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="text-sm text-gray-500 dark:text-gray-400">Hi, <span id="userName" class="font-semibold text-gray-800 dark:text-gray-200">User</span></div>
+                <button onclick="toggleTheme()" class="p-2 rounded-full bg-white dark:bg-gray-800 shadow">
+                    <i id="themeIcon" class="fas fa-lightbulb text-gray-400"></i>
+                </button>
+                <button onclick="logout()" class="px-3 py-2 rounded-md bg-red-500 text-white text-sm font-semibold">Logout</button>
+            </div>
+        </header>
+
+        <section class="mt-6 grid gap-4 md:grid-cols-[2fr,1fr]">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-5">
+                <div class="flex flex-wrap items-center gap-3 justify-between">
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm font-semibold" for="companySelect">Company</label>
+                        <select id="companySelect" class="border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 bg-white dark:bg-gray-900 text-sm" onchange="currentCompany=this.value; renderTable();"></select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="viewCurrentBtn" onclick="setViewMode('current')" class="px-3 py-1.5 rounded-md text-sm font-semibold bg-indigo-600 text-white">Current</button>
+                        <button id="viewGlobalBtn" onclick="setViewMode('global')" class="px-3 py-1.5 rounded-md text-sm font-semibold bg-gray-200 text-gray-700">Global</button>
+                    </div>
+                </div>
+
+                <div id="dropZone" class="mt-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Drag & drop settlement PDFs here, or</p>
+                    <label class="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md cursor-pointer text-sm font-semibold">
+                        <i class="fas fa-upload"></i> Choose Files
+                        <input type="file" class="hidden" accept="application/pdf" multiple onchange="handleFiles(this.files)">
+                    </label>
+                </div>
+
+                <div id="processingStatus" class="hidden mt-4">
+                    <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                        <span>Processing…</span>
+                        <span id="progressText">0%</span>
+                    </div>
+                    <div class="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                        <div id="progressBar" class="h-full bg-indigo-600 w-0"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-5 space-y-3">
+                <h2 class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400">Cloud + Backup</h2>
+                <div class="flex gap-2">
+                    <button id="btnSaveCloud" onclick="saveToCloud()" class="flex-1 px-3 py-2 rounded-md bg-indigo-600 text-white text-sm font-semibold">Save Cloud</button>
+                    <button id="btnLoadCloud" onclick="loadFromCloud()" class="flex-1 px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm font-semibold">Load Cloud</button>
+                </div>
+                <p id="cloudStatus" class="text-xs text-gray-400">Not synced yet.</p>
+
+                <div class="flex gap-2">
+                    <button onclick="backupData()" class="flex-1 px-3 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold">Backup</button>
+                    <label class="flex-1 px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm font-semibold text-center cursor-pointer">
+                        Restore
+                        <input type="file" class="hidden" accept="application/json" onchange="restoreData(this)">
+                    </label>
+                </div>
+
+                <button onclick="printReport()" class="w-full px-3 py-2 rounded-md bg-green-600 text-white text-sm font-semibold">Export PDF Report</button>
+                <button onclick="openClearModal()" class="w-full px-3 py-2 rounded-md bg-red-500 text-white text-sm font-semibold">Clear Data</button>
+            </div>
+        </section>
+
+        <section class="mt-6 bg-white dark:bg-gray-800 rounded-xl shadow">
+            <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-lg font-semibold">Settlement Totals</h2>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Grand Total: <span id="grandTotal" class="font-semibold text-gray-800 dark:text-gray-200">$0.00</span></div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 dark:bg-gray-900/30 text-left text-gray-500 dark:text-gray-400">
+                        <tr>
+                            <th class="p-3">Unit</th>
+                            <th class="p-3">Driver</th>
+                            <th class="p-3 text-right">Amount</th>
+                            <th class="p-3 text-center">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataTableBody"></tbody>
+                    <tfoot id="tableFooter" class="hidden">
+                        <tr>
+                            <td colspan="4" class="p-3 text-xs text-gray-400">Totals update automatically after uploads.</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <div id="deleteFileModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 class="text-lg font-semibold">Delete File</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Are you sure you want to delete this entry?</p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeDeleteFileModal()" class="px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm">Cancel</button>
+                <button onclick="confirmDeleteFile()" class="px-3 py-2 rounded-md bg-red-500 text-white text-sm">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 class="text-lg font-semibold">Edit Unit #</h3>
+            <input id="editUnitInput" class="w-full px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" placeholder="Unit number">
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeEditModal()" class="px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm">Cancel</button>
+                <button onclick="saveUnitEdit()" class="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notesModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 class="text-lg font-semibold">Notes for <span id="noteUnitDisplay"></span></h3>
+            <input type="hidden" id="noteKey">
+            <textarea id="noteInput" class="w-full px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" rows="4" placeholder="Add a note..."></textarea>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeNotesModal()" class="px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm">Cancel</button>
+                <button onclick="saveNote()" class="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="clearModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 class="text-lg font-semibold">Clear Data</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">This will remove data for the selected view.</p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeClearModal()" class="px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm">Cancel</button>
+                <button onclick="confirmClear()" class="px-3 py-2 rounded-md bg-red-500 text-white text-sm">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="restoreModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-sm space-y-4">
+            <h3 class="text-lg font-semibold">Restore Backup</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Replace current data with the selected backup?</p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeRestoreModal()" class="px-3 py-2 rounded-md bg-gray-200 text-gray-700 text-sm">Cancel</button>
+                <button onclick="confirmRestore()" class="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm">Restore</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
