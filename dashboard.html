@@ -4,15 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Tools Hub</title>
-    
-    <!-- Tailwind Configuration for Dark Mode -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
-    </script>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <script type="module">
@@ -41,35 +33,34 @@
 
         // Main Function
         async function initDashboard() {
-            // Apply theme on load
-            const savedTheme = localStorage.getItem('theme');
-            if (savedTheme === 'dark') {
-                document.documentElement.classList.add('dark');
-                updateBulbIcon(true);
+            // --- 1. ADMIN CHECK (OVO JE FALILO!) ---
+            if (localStorage.getItem('admin_mode') === 'true') {
+                const userEl = document.getElementById('userName');
+                if (userEl) {
+                    userEl.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
+                }
+                // Ako je admin, prekidamo funkciju ovde - ne proveravamo kljuceve!
+                return; 
             }
 
+            // --- 2. NORMAL USER CHECKS ---
             const key = localStorage.getItem('my_access_key');
             
-            // 1. Quick key check
             if (!key) {
                 goHome();
                 return;
             }
 
-            // 2. Google Session Check and Name Display
             if (auth) {
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
-                        // Extract name
                         const rawName = user.email.split('@')[0];
                         const niceName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
                         const el = document.getElementById('userName');
                         if (el) el.innerText = niceName;
                         
-                        // Validate key in DB
                         validateSession(key); 
                     } else {
-                        // Not logged in
                         goHome();
                     }
                 });
@@ -93,6 +84,8 @@
         
         window.logout = function() {
             localStorage.removeItem('my_access_key');
+            localStorage.removeItem('admin_mode'); // Brise i admin status
+            
             if (auth) {
                 signOut(auth).then(() => goHome()).catch(() => goHome());
             } else {
@@ -110,11 +103,11 @@
             } catch (e) {
                 console.warn("Redirection blocked (preview mode). Showing fallback.");
                 document.body.innerHTML = `
-                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans dark:bg-gray-900 dark:text-white">
-                        <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg text-center max-w-md">
+                    <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 text-gray-800 font-sans">
+                        <div class="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
                             <i class="fas fa-lock text-4xl text-blue-600 mb-4"></i>
                             <h1 class="text-2xl font-bold mb-2">Authentication Required</h1>
-                            <p class="text-gray-600 dark:text-gray-400 mb-6">You need to log in to access this dashboard.</p>
+                            <p class="text-gray-600 mb-6">You need to log in to access this dashboard.</p>
                             <a href="index.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition inline-block">
                                 Go to Login Page
                             </a>
@@ -124,15 +117,9 @@
             }
         }
 
-        // --- THEME TOGGLE LOGIC ---
+        // Theme Logic
         window.toggleTheme = function() {
             const html = document.documentElement;
-            const bulb = document.getElementById('themeIcon');
-            
-            // Add animation class
-            bulb.classList.add('bulb-shake');
-            setTimeout(() => bulb.classList.remove('bulb-shake'), 500);
-
             if (html.classList.contains('dark')) {
                 html.classList.remove('dark');
                 localStorage.setItem('theme', 'light');
@@ -147,41 +134,28 @@
         function updateBulbIcon(isDark) {
             const bulb = document.getElementById('themeIcon');
             if (isDark) {
-                // ON State (Dark Mode Active - Bulb GLOWS to provide light)
                 bulb.classList.remove('text-gray-400');
                 bulb.classList.add('text-yellow-400', 'bulb-on');
             } else {
-                // OFF State (Light Mode Active - Bulb is OFF)
                 bulb.classList.remove('text-yellow-400', 'bulb-on');
                 bulb.classList.add('text-gray-400');
             }
+        }
+        
+        // Init Theme
+        if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+            updateBulbIcon(true);
         }
 
         initDashboard();
     </script>
     
     <style>
-        /* Lightbulb Animations */
-        .bulb-on {
-            filter: drop-shadow(0 0 5px #facc15);
-        }
-        
-        @keyframes shake {
-            0% { transform: rotate(0deg); }
-            25% { transform: rotate(15deg); }
-            50% { transform: rotate(-15deg); }
-            75% { transform: rotate(5deg); }
-            100% { transform: rotate(0deg); }
-        }
-        
-        .bulb-shake {
-            animation: shake 0.4s ease-in-out;
-        }
-        
-        /* Smooth background transitions */
-        body, .tool-card, nav {
-            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
-        }
+        .bulb-on { filter: drop-shadow(0 0 5px #facc15); }
+        .bulb-shake { animation: shake 0.4s ease-in-out; }
+        @keyframes shake { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(15deg)} 75%{transform:rotate(-15deg)} }
+        body, .tool-card, nav { transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
     </style>
 </head>
 <body class="flex flex-col min-h-screen text-gray-800 bg-gray-50 font-sans dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300">
@@ -190,16 +164,13 @@
     <nav class="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-50 transition-colors duration-300">
         <div class="container mx-auto flex justify-between items-center">
             <div class="font-bold text-xl text-gray-700 dark:text-white flex items-center">
-                <i class="fas fa-cubes text-blue-600 mr-2"></i> Truck Manager Dashboard
+                <i class="fas fa-cubes text-blue-600 mr-2"></i> Dashboard
             </div>
             
             <div class="flex items-center gap-4">
-                <!-- Theme Toggle (Lightbulb - SVG) -->
-                <button onclick="toggleTheme()" class="p-2 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition focus:outline-none ring-1 ring-gray-200 dark:ring-gray-600" title="Toggle Theme">
-                    <!-- SVG Lightbulb Icon (Direct Embed to guarantee visibility) -->
-                    <svg id="themeIcon" class="w-6 h-6 text-gray-400 transition-all duration-300" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M11 3a1 1 0 10-2 0v1a1 1 0 10 2 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"></path>
-                    </svg>
+                <!-- Theme Toggle -->
+                <button onclick="toggleTheme()" class="p-2 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition focus:outline-none ring-1 ring-gray-200 dark:ring-gray-600">
+                    <svg id="themeIcon" class="w-6 h-6 text-gray-400 transition-all duration-300" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 10 2 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"></path></svg>
                 </button>
 
                 <!-- User Info -->
@@ -257,9 +228,8 @@
             
             <!-- TOOL 3: Notes -->
             <a href="#" onclick="alert('Coming soon!')" class="tool-card bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden cursor-pointer group hover:ring-2 ring-yellow-500 transition hover:-translate-y-1 block relative border border-transparent dark:border-gray-700">
-                <!-- Grayscale removed to look active in dark mode, opacity kept for 'coming soon' feel -->
                 <div class="bg-yellow-500 p-6 flex justify-center items-center h-40 opacity-90">
-                    <i class="fas fa-sticky-note text-6xl text-white group-hover:scale-110 transition-transform duration-300"></i>
+                    <i class="fas fa-sticky-note text-6xl text-white opacity-90 group-hover:scale-110 transition-transform duration-300"></i>
                 </div>
                 <div class="p-6">
                     <h3 class="text-xl font-bold text-gray-800 dark:text-white mb-2">Notes</h3>
@@ -274,9 +244,7 @@
     </main>
     
     <footer class="text-center text-gray-400 dark:text-gray-500 text-sm py-8 border-t border-gray-200 dark:border-gray-700 mt-auto">
-        &copy; 2026 Truck Manager Dashboard. All rights reserved.
+        &copy; 2026 My Tools Hub. All rights reserved.
     </footer>
 </body>
 </html>
-
-
