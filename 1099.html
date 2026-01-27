@@ -5,28 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>1099 Manager</title>
     
-    <!-- Tailwind & Dark Mode Config -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
+        tailwind.config = { darkMode: 'class' }
     </script>
     
-    <!-- Icons & Libraries -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
 
-    <!-- FIREBASE SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // SETTINGS
+        // 1. SETTINGS
         const firebaseConfig = {
             apiKey: "AIzaSyDjtmRPzKilbqHGt57SvVm5fo3KyZ9D03U",
             authDomain: "truck-dashboard-18d7e.firebaseapp.com",
@@ -37,26 +32,24 @@
             measurementId: "G-42RMFB41Q2"
         };
 
-        // GLOBAL VARIABLES
-        window.appData = []; 
-        window.unitNotes = {}; 
-        window.restoreCandidate = null;
-        window.viewMode = 'current'; 
-        window.fileToDeleteId = null;
-        window.knownCompanies = ["Default Company"];
-        window.currentCompany = "Default Company";
-        
+        // 2. STATE VARIABLES
+        let appData = []; 
+        let unitNotes = {}; 
+        let restoreCandidate = null;
+        let viewMode = 'current'; 
+        let fileToDeleteId = null;
+        let knownCompanies = ["Default Company"];
+        let currentCompany = "Default Company";
         let auth, db;
 
-        // INITIALIZATION
+        // 3. INITIALIZATION
         try {
             const app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             db = getFirestore(app);
             
-            // ADMIN CHECK (No Redirect for Admin)
             if (localStorage.getItem('admin_mode') === 'true') {
-                 // Admin logic handled in initApp UI update
+                 // Admin logic: UI update happens in initApp
             } else {
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
@@ -65,44 +58,25 @@
                         const el = document.getElementById('userName');
                         if(el) el.innerText = niceName;
                     } else {
-                        // Redirect to login if not admin and not logged in
                         goHome(); 
                     }
                 });
             }
-        } catch(e) { console.error("Firebase Init Error:", e); }
+        } catch(e) { console.error("Init Error:", e); }
 
-        // --- GLOBAL FUNCTIONS ---
+        // 4. CORE FUNCTIONS (Local Definitions)
 
-        window.initApp = function() {
-            // Theme
-            const savedTheme = localStorage.getItem('theme');
-            if (savedTheme === 'dark') {
-                document.documentElement.classList.add('dark');
-                updateBulbIcon(true);
-            }
-            
-            // Admin UI
-            if (localStorage.getItem('admin_mode') === 'true') {
-                 const el = document.getElementById('userName');
-                 if(el) el.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
-            }
-
-            // Setup Dropzone
-            const dropZone = document.getElementById('dropZone');
-            if(dropZone) {
-                ['dragenter','dragover','dragleave','drop'].forEach(e => dropZone.addEventListener(e, preventDefaults, false));
-                dropZone.addEventListener('drop', handleDrop, false);
-            }
-
-            window.updateCompanyDropdown();
-            window.renderTable();
+        const goHome = () => {
+            try {
+                if (window.location.protocol !== 'blob:') {
+                    window.location.href = "index.html";
+                } else {
+                    document.body.innerHTML = "<div class='text-center p-10'><h1>Auth Required</h1><a href='index.html'>Login</a></div>";
+                }
+            } catch(e) {}
         };
 
-        function preventDefaults(e){ e.preventDefault(); e.stopPropagation(); }
-        function handleDrop(e){ window.handleFiles(e.dataTransfer.files); }
-
-        window.logout = function() {
+        const logout = () => {
             localStorage.removeItem('my_access_key');
             localStorage.removeItem('admin_mode'); 
             if (auth) {
@@ -112,146 +86,131 @@
             }
         };
 
-        function goHome() {
-            try {
-                if (window.location.protocol !== 'blob:') {
-                    window.location.href = "index.html";
-                } else {
-                    document.body.innerHTML = "<div class='text-center p-10'><h1>Auth Required</h1><a href='index.html'>Login</a></div>";
+        const renderTable = () => {
+            const tbody = document.getElementById('dataTableBody');
+            const footer = document.getElementById('tableFooter');
+            const grandTotalEl = document.getElementById('grandTotal');
+            
+            let filteredData = (viewMode === 'current') ? appData.filter(i => i.company === currentCompany) : appData;
+
+            if(filteredData.length === 0) {
+                const msg = viewMode === 'current' ? `No data for <b>${currentCompany}</b>.` : `No data uploaded.`;
+                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 dark:text-gray-500">${msg}</td></tr>`;
+                footer.classList.add('hidden');
+                return;
+            }
+
+            footer.classList.remove('hidden');
+            const aggregated = {};
+            filteredData.forEach(item => {
+                let key = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
+                if(!aggregated[key]) aggregated[key] = { unit: item.unit, name: item.name, totalAmount: 0, files: [] };
+                aggregated[key].totalAmount += item.amount;
+                aggregated[key].files.push(item);
+                if (aggregated[key].name === "Unknown" && item.name !== "Unknown") aggregated[key].name = item.name;
+            });
+
+            const owners = [];
+            const drivers = [];
+            Object.values(aggregated).forEach(item => { (item.unit && item.unit !== "") ? owners.push(item) : drivers.push(item); });
+            
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) { 
+                    const numA = parseInt(a.unit.replace(/\D/g,''));
+                    const numB = parseInt(b.unit.replace(/\D/g,''));
+                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
                 }
-            } catch(e) {}
-        }
+                return (a.name || "").localeCompare(b.name || "");
+            };
+            owners.sort(sortFn); 
+            drivers.sort(sortFn);
 
-        // --- CLOUD FUNCTIONS ---
-        window.saveToCloud = async function() {
-            if (localStorage.getItem('admin_mode') === 'true') { alert("Cloud save disabled in Admin Mode."); return; }
-            if (!auth || !auth.currentUser) { alert("Please login to save."); return; }
-            
-            const btn = document.getElementById('btnSaveCloud');
-            const originalHTML = btn.innerHTML;
-            const statusText = document.getElementById('cloudStatus');
-            
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            let html = '';
+            let totalSum = 0;
 
-            try {
-                const user = auth.currentUser;
-                await setDoc(doc(db, "users", user.uid, "data", "1099_backup"), {
-                    version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies, lastUpdated: new Date().toISOString()
+            const renderRows = (list) => {
+                list.forEach(group => {
+                    totalSum += group.totalAmount;
+                    const safeKey = (group.unit || group.name).replace(/[^a-zA-Z0-9]/g, '_'); 
+                    const noteKey = `${currentCompany}_${group.unit || group.name}`;
+                    const hasNote = unitNotes[noteKey] && unitNotes[noteKey].trim() !== "";
+                    const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
+                    let rateLabel = "";
+                    if (group.unit) rateLabel = getCommissionLabel(group.unit);
+
+                    html += `
+                    <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                        <td class="p-3 font-bold text-gray-800 dark:text-gray-200">${group.unit || ""}</td>
+                        <td class="p-3 text-gray-600 dark:text-gray-400 flex items-center justify-between">
+                            <span>${group.name}</span>
+                            ${viewMode === 'current' ? `<button onclick="openNotesModal('${group.unit || group.name}')" class="${noteColor} transition"><i class="fas fa-sticky-note"></i></button>` : ''}
+                        </td>
+                        <td class="p-3 text-right font-mono font-medium text-blue-700 dark:text-blue-400">
+                            $${group.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} 
+                            <span class="text-xs text-gray-400 ml-1">${rateLabel}</span>
+                        </td>
+                        <td class="p-3 text-center">
+                            <button onclick="toggleDetails('details-${safeKey}')" class="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 px-3 py-1 rounded-full">
+                                ${viewMode === 'global' ? 'Breakdown' : group.files.length + ' Files'} <i class="fas fa-chevron-down ml-1"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr id="details-${safeKey}" class="hidden bg-gray-50/50 dark:bg-gray-900/50">
+                        <td colspan="4" class="p-0"><div class="p-4 pl-12 border-l-4 border-blue-200 dark:border-blue-800">
+                            <ul class="space-y-2">
+                                ${group.files.map(f => `<li class="flex justify-between items-center text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700"><span class="text-gray-600 dark:text-gray-400 truncate max-w-[150px]">${f.filename}</span><div class="flex gap-2"><span class="font-mono text-gray-800 dark:text-gray-200">$${f.amount.toLocaleString('en-US',{minimumFractionDigits:2})}</span>${viewMode === 'current' ? `<button onclick="deleteFile('${f.id}')" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>` : ''}</div></li>`).join('')}
+                            </ul>
+                        </div></td>
+                    </tr>`;
                 });
-                
-                // SUCCESS UI
-                btn.innerHTML = '<i class="fas fa-check"></i>';
-                btn.classList.add('bg-green-600', 'hover:bg-green-700');
-                btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
-                
-                const now = new Date();
-                statusText.innerText = "Saved: " + now.toLocaleTimeString();
-                statusText.classList.remove('text-gray-400', 'text-red-500');
-                statusText.classList.add('text-green-600');
+            };
 
-                setTimeout(() => {
-                    btn.innerHTML = originalHTML;
-                    btn.classList.remove('bg-green-600', 'hover:bg-green-700');
-                    btn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
-                }, 2000);
-                
-            } catch(e) {
-                console.error(e);
-                statusText.innerText = "Save failed!";
-                statusText.classList.remove('text-gray-400', 'text-green-600');
-                statusText.classList.add('text-red-500');
-                alert("Cloud Error: " + e.message);
-            } finally {
-                btn.disabled = false;
+            if (owners.length > 0) renderRows(owners);
+            if (drivers.length > 0) {
+                html += `<tr class="bg-gray-100 dark:bg-gray-700 font-bold text-gray-700 dark:text-gray-200"><td colspan="4" class="p-2 pl-4 text-xs uppercase tracking-wide">Company Drivers</td></tr>`;
+                renderRows(drivers);
             }
+            tbody.innerHTML = html;
+            grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2});
         };
 
-        window.loadFromCloud = async function() {
-            if (localStorage.getItem('admin_mode') === 'true') { alert("Cloud load disabled in Admin Mode."); return; }
-            if (!auth || !auth.currentUser) { alert("Please login to load."); return; }
-            
-            const btn = document.getElementById('btnLoadCloud');
-            const originalHTML = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-            try {
-                const user = auth.currentUser;
-                const snap = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"));
-                
-                if(snap.exists()) {
-                    const json = snap.data();
-                    if(confirm("Load backup from " + new Date(json.lastUpdated).toLocaleString() + "?")) {
-                        window.appData = json.appData || [];
-                        window.unitNotes = json.unitNotes || {};
-                        window.knownCompanies = json.knownCompanies || ["Default Company"];
-                        
-                        if(window.appData.length > 0 && window.appData[window.appData.length-1].company) {
-                            window.currentCompany = window.appData[window.appData.length-1].company;
-                        } else {
-                            window.currentCompany = window.knownCompanies[0];
-                        }
-                        window.updateCompanyDropdown(); 
-                        window.renderTable();
-                        document.getElementById('cloudStatus').innerText = "Loaded: " + new Date().toLocaleTimeString();
-                    }
-                } else { alert("No backup found in Cloud."); }
-            } catch(e) { 
-                console.error(e);
-                alert("Cloud Error: " + e.message); 
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHTML;
-            }
+        const updateCompanyDropdown = () => {
+            const select = document.getElementById('companySelect');
+            select.innerHTML = '';
+            knownCompanies.forEach(comp => {
+                const option = document.createElement('option');
+                option.value = comp;
+                option.text = comp;
+                if(comp === currentCompany) option.selected = true;
+                select.appendChild(option);
+            });
+            document.getElementById('uploadTargetCompany').innerText = currentCompany;
         };
 
-        // --- FILE HANDLING ---
-        window.handleFiles = async function(files) {
-            if (window.viewMode === 'global') {
-                alert("Please switch to 'Current' view to upload files.");
-                return;
-            }
-
+        const handleFiles = async (files) => {
+            if (viewMode === 'global') { alert("Please switch to 'Current' view."); return; }
             const fileArray = [...files].filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-            
-            if(fileArray.length === 0) {
-                alert("No valid PDF files found.");
-                return;
-            }
+            if(fileArray.length === 0) { alert("No PDFs found."); return; }
 
             document.getElementById('processingStatus').classList.remove('hidden');
             const pb = document.getElementById('progressBar');
-            const pt = document.getElementById('progressText');
-
+            
             for (let i = 0; i < fileArray.length; i++) {
                 const file = fileArray[i];
-                if (window.appData.some(d => d.filename === file.name && d.company === window.currentCompany)) continue;
-
+                if (appData.some(d => d.filename === file.name && d.company === currentCompany)) continue;
                 try {
                     const data = await extractDataFromPDF(file);
                     data.id = Date.now() + Math.random().toString(36).substr(2, 9);
-                    data.company = window.currentCompany;
-                    window.appData.push(data);
-                } catch(e) {
-                    console.error("Error parsing " + file.name, e);
-                }
-
-                const pct = Math.round(((i + 1) / fileArray.length) * 100);
-                pb.style.width = pct + "%";
-                pt.innerText = pct + "%";
+                    data.company = currentCompany;
+                    appData.push(data);
+                } catch(e) { console.error("Parse error:", e); }
+                pb.style.width = Math.round(((i + 1) / fileArray.length) * 100) + "%";
             }
-
-            setTimeout(() => {
-                document.getElementById('processingStatus').classList.add('hidden');
-                pb.style.width = "0%";
-            }, 1000);
-
-            window.renderTable();
+            setTimeout(() => { document.getElementById('processingStatus').classList.add('hidden'); pb.style.width="0%"; }, 1000);
+            renderTable();
         };
 
-        // --- PDF EXTRACTION ---
-        async function extractDataFromPDF(file) {
+        const extractDataFromPDF = async (file) => {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
             const page = await pdf.getPage(1);
@@ -264,271 +223,113 @@
 
             let lines = [], currentLine = [], lastY = -1;
             rightSideItems.forEach(item => {
-                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) {
-                    currentLine.push(item);
-                } else {
-                    currentLine.sort((a, b) => a.transform[4] - b.transform[4]);
-                    lines.push(currentLine);
-                    currentLine = [item];
-                }
+                if (lastY === -1 || Math.abs(item.transform[5] - lastY) < 6) currentLine.push(item);
+                else { currentLine.sort((a, b) => a.transform[4] - b.transform[4]); lines.push(currentLine); currentLine = [item]; }
                 lastY = item.transform[5];
             });
-            if (currentLine.length > 0) lines.push(currentLine);
+            if(currentLine.length) lines.push(currentLine);
 
-            let textLines = lines.map(line => {
-                return {
-                    text: line.map(item => item.str).join(' ').trim(), 
-                    y: line[0].transform[5],
-                    items: line
-                };
-            });
-
+            let textLines = lines.map(line => ({ text: line.map(i => i.str).join(' ').trim(), y: line[0].transform[5], items: line }));
+            
             let unit = "Unknown", name = "Unknown", amount = 0.0;
 
-            for (let l of textLines) {
+            // Unit
+            for(let l of textLines) {
                 const m = l.text.match(/\b(?:Unit|Truck|Trk|Trlr)\b\s*[:#.]?\s*([A-Za-z0-9\-\s]+)/i);
-                if (m) { 
-                    let c = m[1].trim().split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim(); 
-                    if(c) { unit = c; break; } 
-                }
+                if(m) { let c = m[1].trim().split(/Driver|Date|Pay|Total|Statement|Page/i)[0].trim(); if(c) { unit = c; break; } }
             }
 
-            if (name === "Unknown") {
-                for (let i = 0; i < textLines.length; i++) {
-                    const txt = textLines[i].text.toLowerCase();
-                    if (/\b(unit|truck)\b/i.test(txt)) {
-                        for (let j = 1; j <= 3; j++) {
-                            if (i + j < textLines.length) {
-                                const nextTxt = textLines[i+j].text;
-                                const parenMatch = nextTxt.match(/^\((.+?)\)$/);
-                                if (parenMatch) { name = parenMatch[1].trim(); break; }
+            // Name
+            if(name === "Unknown") {
+                for(let i=0; i<textLines.length; i++) {
+                    if(/\b(unit|truck)\b/i.test(textLines[i].text.toLowerCase())) {
+                        for(let j=1; j<=3; j++) {
+                            if(i+j < textLines.length) {
+                                const pm = textLines[i+j].text.match(/^\((.+?)\)$/);
+                                if(pm) { name = pm[1].trim(); break; }
                             }
                         }
                     }
-                    if (name !== "Unknown") break;
+                    if(name !== "Unknown") break;
                 }
             }
-
             let isCompanyDriver = false;
-            if (name === "Unknown") {
-                for (let i = 0; i < textLines.length; i++) {
+            if(name === "Unknown") {
+                for(let i=0; i<textLines.length; i++) {
                     const txt = textLines[i].text.toUpperCase();
-                    if (txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
-                        if (i + 1 < textLines.length) {
-                            const nextTxt = textLines[i+1].text;
-                            const isDate = /\d/.test(nextTxt) && (nextTxt.includes('-') || nextTxt.includes('/'));
-                            const isUnit = /truck|unit|#/i.test(nextTxt);
-                            if (!isDate && !isUnit && nextTxt.length > 2) {
-                                name = nextTxt; isCompanyDriver = true; break;
+                    if(txt === 'STATEMENT' || txt.endsWith(' STATEMENT')) {
+                        if(i+1 < textLines.length) {
+                            const nt = textLines[i+1].text;
+                            if(!/\d/.test(nt) && !/truck|unit|#/i.test(nt) && nt.length > 2) {
+                                name = nt; isCompanyDriver = true; break;
                             }
                         }
                     }
                 }
             }
-
-            if (isCompanyDriver) unit = ""; 
-
-            if (name === "Unknown") {
-                for (let l of textLines) {
+            if(isCompanyDriver) unit = ""; 
+            if(name === "Unknown") {
+                for(let l of textLines) {
                     const m = l.text.match(/(?:Driver|Driver Name|Pay to)\s*[:#.]?\s*([A-Za-z\s\.]+)/i);
-                    if (m) { name = m[1].trim(); break; }
+                    if(m) { name = m[1].trim(); break; }
                 }
             }
 
-            // Extract Amount
+            // Amount
             const fullItems = textContent.items.sort((a, b) => b.transform[5] - a.transform[5]);
             let fullLines = [], cLine = [], lY = -1;
-            fullItems.forEach(item => {
-                if (lY === -1 || Math.abs(item.transform[5] - lY) < 6) { cLine.push(item); } 
-                else { cLine.sort((a, b) => a.transform[4] - b.transform[4]); fullLines.push(cLine.map(i=>i.str).join(' ')); cLine = [item]; }
-                lY = item.transform[5];
+            fullItems.forEach(i => {
+                if (lY === -1 || Math.abs(i.transform[5] - lY) < 6) cLine.push(i);
+                else { cLine.sort((a,b)=>a.transform[4]-b.transform[4]); fullLines.push(cLine.map(x=>x.str).join(' ')); cLine=[i]; }
+                lY = i.transform[5];
             });
-            if(cLine.length) fullLines.push(cLine.map(i=>i.str).join(' '));
+            if(cLine.length) fullLines.push(cLine.map(x=>x.str).join(' '));
 
-            if (isCompanyDriver) {
-                let checkTotalFound = false;
+            if(isCompanyDriver) {
+                let found = false;
                 for(let l of fullLines) {
-                    if(/check total|net pay|check amount/i.test(l)) {
+                    if(/check total|net pay|check amount/i.test(l.toLowerCase())) {
                         const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
-                        if(m) { amount = parseFloat(m[1].replace(',','')); checkTotalFound=true; }
+                        if(m) { amount = parseFloat(m[1].replace(',','')); found=true; }
                     }
                 }
-                if (!checkTotalFound) {
-                     for(let i = fullLines.length - 1; i >= 0; i--) {
-                         if(fullLines[i].toLowerCase().includes('total')) {
+                if(!found) {
+                     for(let i=fullLines.length-1; i>=0; i--) {
+                         if(/total/i.test(fullLines[i])) {
                              const m = fullLines[i].match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                              if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                          }
                      }
                 }
             } else {
-                let tripFound = false;
+                let tf = false;
                 for(let l of fullLines) {
                     const lower = l.toLowerCase();
-                    if(lower.includes('trip')) tripFound = true;
-                    if(tripFound && lower.includes('total')) {
+                    if(lower.includes('trip')) tf=true;
+                    if(tf && lower.includes('total')) {
                         const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
                         if(m) { amount = parseFloat(m[1].replace(',','')); break; }
                     }
                 }
-                if (amount === 0) {
-                    for(let l of fullLines) {
-                        if(l.toLowerCase().includes('total')) {
-                            const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
-                            if(m) { amount = parseFloat(m[1].replace(',','')); break; }
-                        }
-                    }
+                if(amount === 0) {
+                     for(let l of fullLines) {
+                         if(l.toLowerCase().includes('total')) {
+                             const m = l.match(/(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                             if(m) { amount = parseFloat(m[1].replace(',','')); break; }
+                         }
+                     }
                 }
             }
-
             return { unit, name, amount, filename: file.name };
-        }
+        };
 
-        function getCommissionLabel(unitStr) {
+        const getCommissionLabel = (unitStr) => {
             if (!unitStr) return "";
             if (unitStr.includes("287") || unitStr.includes("3781")) return "(10%)";
             return "(12%)";
-        }
-
-        window.renderTable = function() {
-            const tbody = document.getElementById('dataTableBody');
-            const footer = document.getElementById('tableFooter');
-            const grandTotalEl = document.getElementById('grandTotal');
-            
-            let filteredData = [];
-            if (window.viewMode === 'current') {
-                filteredData = window.appData.filter(item => item.company === window.currentCompany);
-            } else {
-                filteredData = window.appData; 
-            }
-
-            if(filteredData.length === 0) {
-                const msg = window.viewMode === 'current' 
-                    ? `No data for <b>${window.currentCompany}</b>. Upload files or switch companies.` 
-                    : `No data uploaded yet.`;
-                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-gray-400 dark:text-gray-500">${msg}</td></tr>`;
-                footer.classList.add('hidden');
-                return;
-            }
-
-            footer.classList.remove('hidden');
-            const aggregated = {};
-            filteredData.forEach(item => {
-                let key = "";
-                if (item.unit && item.unit !== "Unknown") {
-                    key = item.unit.toUpperCase();
-                } else {
-                    key = item.name.toUpperCase();
-                }
-                
-                if(!aggregated[key]) {
-                    aggregated[key] = { unit: item.unit, name: item.name, totalAmount: 0, files: [] };
-                }
-                
-                aggregated[key].totalAmount += item.amount;
-                aggregated[key].files.push(item);
-                
-                if (aggregated[key].name === "Unknown" && item.name !== "Unknown") {
-                    aggregated[key].name = item.name;
-                }
-            });
-
-            const owners = [];
-            const drivers = [];
-            Object.values(aggregated).forEach(item => {
-                if (item.unit && item.unit !== "") owners.push(item);
-                else drivers.push(item);
-            });
-
-            const sortFn = (a, b) => {
-                if (a.unit && b.unit) {
-                    const numA = parseInt(a.unit.replace(/\D/g,''));
-                    const numB = parseInt(b.unit.replace(/\D/g,''));
-                    if(!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                }
-                return (a.name || "").localeCompare(b.name || "");
-            };
-
-            owners.sort(sortFn);
-            drivers.sort(sortFn);
-
-            let html = '';
-            let totalSum = 0;
-
-            const renderRows = (list) => {
-                list.forEach(group => {
-                    totalSum += group.totalAmount;
-                    const safeKey = group.unit ? group.unit.replace(/[^a-zA-Z0-9]/g, '_') : group.name.replace(/[^a-zA-Z0-9]/g, '_'); 
-                    const noteKey = `${window.currentCompany}_${group.unit || group.name}`;
-                    const hasNote = window.unitNotes[noteKey] && window.unitNotes[noteKey].trim() !== "";
-                    const noteColor = hasNote ? "text-yellow-500" : "text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400";
-                    let rateLabel = "";
-                    if (group.unit) rateLabel = getCommissionLabel(group.unit);
-
-                    html += `
-                        <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                            <td class="p-3 font-bold text-gray-800 dark:text-gray-200">${group.unit || ""}</td>
-                            <td class="p-3 text-gray-600 dark:text-gray-400 flex items-center justify-between">
-                                <span>${group.name}</span>
-                                ${window.viewMode === 'current' ? `
-                                <button onclick="openNotesModal('${group.unit || group.name}')" class="${noteColor} transition" title="Add/View Notes">
-                                    <i class="${noteIcon} text-lg"></i>
-                                </button>` : ''}
-                            </td>
-                            <td class="p-3 text-right font-mono font-medium text-blue-700 dark:text-blue-400">
-                                $${group.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2})} 
-                                <span class="text-xs text-gray-400 ml-1">${rateLabel}</span>
-                            </td>
-                            <td class="p-3 text-center">
-                                <button onclick="toggleDetails('details-${safeKey}')" class="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 px-3 py-1 rounded-full">
-                                    ${window.viewMode === 'global' ? 'Breakdown' : group.files.length + ' Files'} <i class="fas fa-chevron-down ml-1"></i>
-                                </button>
-                            </td>
-                        </tr>
-                        <tr id="details-${safeKey}" class="hidden bg-gray-50/50 dark:bg-gray-900/50">
-                            <td colspan="4" class="p-0">
-                                <div class="p-4 pl-12 border-l-4 border-blue-200 dark:border-blue-800">
-                                    <ul class="space-y-2">
-                                        ${group.files.map(f => `
-                                            <li class="flex justify-between items-center text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700">
-                                                <div class="flex items-center gap-3">
-                                                    <i class="far fa-file-pdf text-red-400"></i>
-                                                    <span class="text-gray-600 dark:text-gray-400 truncate max-w-[150px]">${f.filename}</span>
-                                                    <div class="flex gap-1">
-                                                        <button onclick="openEditModal('${f.id}', '${f.unit}')" class="text-gray-300 hover:text-blue-500 transition px-1"><i class="fas fa-pencil-alt text-xs"></i></button>
-                                                        <button onclick="deleteFile('${f.id}')" class="text-gray-300 hover:text-red-500 transition px-1"><i class="fas fa-trash-alt text-xs"></i></button>
-                                                    </div>
-                                                </div>
-                                                <span class="font-mono text-gray-800 dark:text-gray-200">$${f.amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
-                                            </li>
-                                        `).join('')}
-                                    </ul>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                });
-            };
-
-            if (owners.length > 0) renderRows(owners);
-            
-            if (drivers.length > 0) {
-                html += `<tr class="bg-gray-100 dark:bg-gray-700 font-bold text-gray-700 dark:text-gray-200"><td colspan="4" class="p-2 pl-4 text-xs uppercase tracking-wide">Company Drivers</td></tr>`;
-                renderRows(drivers);
-            }
-
-            tbody.innerHTML = html;
-            grandTotalEl.innerText = "$" + totalSum.toLocaleString('en-US', {minimumFractionDigits: 2});
-        }
-
-        window.toggleTheme = function() {
-            const html = document.documentElement;
-            const isDark = html.classList.toggle('dark');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
-            updateBulbIcon(isDark);
         };
 
-        function updateBulbIcon(isDark) {
+        const updateBulbIcon = (isDark) => {
             const bulb = document.getElementById('themeIcon');
             if(bulb) {
                 if (isDark) {
@@ -541,24 +342,67 @@
                     bulb.style.filter = "none";
                 }
             }
-        }
-
-        window.updateCompanyDropdown = function() {
-            const select = document.getElementById('companySelect');
-            select.innerHTML = '';
-            window.knownCompanies.forEach(comp => {
-                const option = document.createElement('option');
-                option.value = comp;
-                option.text = comp;
-                if(comp === window.currentCompany) option.selected = true;
-                select.appendChild(option);
-            });
-            document.getElementById('uploadTargetCompany').innerText = window.currentCompany;
         };
 
-        window.switchCompany = function(newCompany) {
-            window.currentCompany = newCompany;
+        const initApp = () => {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+                updateBulbIcon(true);
+            }
+            if (localStorage.getItem('admin_mode') === 'true') {
+                 const el = document.getElementById('userName');
+                 if(el) el.innerHTML = '<span class="text-green-500 font-bold">Administrator</span>';
+            }
+
+            const dropZone = document.getElementById('dropZone');
+            if(dropZone) {
+                ['dragenter','dragover','dragleave','drop'].forEach(e => dropZone.addEventListener(e, preventDefaults, false));
+                dropZone.addEventListener('drop', handleDrop, false);
+            }
             updateCompanyDropdown();
+            renderTable();
+        };
+
+        // --- EXPORT TO WINDOW (GLOBAL ACCESS) ---
+        window.initApp = initApp;
+        window.logout = logout;
+        window.handleFiles = handleFiles;
+        
+        window.toggleTheme = function() {
+            const html = document.documentElement;
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                updateBulbIcon(false);
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                updateBulbIcon(true);
+            }
+        };
+
+        window.switchCompany = function(n) { currentCompany=n; updateCompanyDropdown(); renderTable(); };
+        window.switchView = function(m) {
+            viewMode = m;
+            const btnCurrent = document.getElementById('btnViewCurrent');
+            const btnGlobal = document.getElementById('btnViewGlobal');
+            const overlay = document.getElementById('globalOverlay');
+            const title = document.getElementById('reportTitle');
+            const on = ['bg-white', 'dark:bg-gray-700', 'text-blue-600', 'dark:text-blue-400', 'shadow-sm'];
+            const off = ['text-gray-500', 'dark:text-gray-400'];
+
+            if (m === 'current') {
+                btnCurrent.classList.add(...on); btnCurrent.classList.remove(...off);
+                btnGlobal.classList.remove(...on); btnGlobal.classList.add(...off);
+                overlay.classList.add('hidden');
+                title.innerText = `${currentCompany} Report`;
+            } else {
+                btnGlobal.classList.add(...on); btnGlobal.classList.remove(...off);
+                btnCurrent.classList.remove(...on); btnCurrent.classList.add(...off);
+                overlay.classList.remove('hidden');
+                title.innerText = "Global / Yearly Report";
+            }
             renderTable();
         };
 
@@ -566,68 +410,102 @@
         window.closeNewCompanyModal = function() { document.getElementById('newCompanyModal').classList.add('hidden'); }
         window.confirmNewCompany = function() {
             const n = document.getElementById('newCompanyName').value.trim();
-            if(n && !window.knownCompanies.includes(n)) { window.knownCompanies.push(n); window.currentCompany=n; updateCompanyDropdown(); renderTable(); closeNewCompanyModal(); }
-        };
-        
-        window.switchView = function(m) {
-            window.viewMode = m;
-            const btnCurrent = document.getElementById('btnViewCurrent');
-            const btnGlobal = document.getElementById('btnViewGlobal');
-            const overlay = document.getElementById('globalOverlay');
-            const title = document.getElementById('reportTitle');
-            
-            const activeClass = ['bg-white', 'dark:bg-gray-700', 'text-blue-600', 'dark:text-blue-400', 'shadow-sm'];
-            const inactiveClass = ['text-gray-500', 'dark:text-gray-400'];
-
-            if (m === 'current') {
-                btnCurrent.classList.add(...activeClass); btnCurrent.classList.remove(...inactiveClass);
-                btnGlobal.classList.remove(...activeClass); btnGlobal.classList.add(...inactiveClass);
-                overlay.classList.add('hidden');
-                title.innerText = `${window.currentCompany} Report`;
-            } else {
-                btnGlobal.classList.add(...activeClass); btnGlobal.classList.remove(...inactiveClass);
-                btnCurrent.classList.remove(...activeClass); btnCurrent.classList.add(...inactiveClass);
-                overlay.classList.remove('hidden');
-                title.innerText = "Global / Yearly Report";
-            }
-            renderTable();
+            if(n && !knownCompanies.includes(n)) { knownCompanies.push(n); currentCompany=n; updateCompanyDropdown(); renderTable(); closeNewCompanyModal(); }
         };
 
-        // Modal Helpers
         window.toggleDetails = function(id) { document.getElementById(id).classList.toggle('hidden'); }
-        window.openNotesModal = function(k) { document.getElementById('noteUnitDisplay').innerText=k; document.getElementById('noteKey').value=`${window.currentCompany}_${k}`; document.getElementById('noteInput').value=window.unitNotes[`${window.currentCompany}_${k}`]||""; document.getElementById('notesModal').classList.remove('hidden'); }
+        window.openNotesModal = function(k) { document.getElementById('noteUnitDisplay').innerText=k; document.getElementById('noteKey').value=`${currentCompany}_${k}`; document.getElementById('noteInput').value=unitNotes[`${currentCompany}_${k}`]||""; document.getElementById('notesModal').classList.remove('hidden'); }
         window.closeNotesModal = function() { document.getElementById('notesModal').classList.add('hidden'); }
-        window.saveNote = function() { window.unitNotes[document.getElementById('noteKey').value] = document.getElementById('noteInput').value; closeNotesModal(); renderTable(); }
+        window.saveNote = function() { unitNotes[document.getElementById('noteKey').value] = document.getElementById('noteInput').value; closeNotesModal(); renderTable(); }
         window.openClearModal = function() { document.getElementById('clearModal').classList.remove('hidden'); }
         window.closeClearModal = function() { document.getElementById('clearModal').classList.add('hidden'); }
-        window.confirmClear = function() { if(window.viewMode==='global') { window.appData=[]; window.unitNotes={}; window.knownCompanies=["Default Company"]; window.currentCompany="Default Company"; } else { window.appData=window.appData.filter(i=>i.company!==window.currentCompany); } renderTable(); closeClearModal(); }
-        window.deleteFile = function(id) { window.fileToDeleteId=id; document.getElementById('deleteFileModal').classList.remove('hidden'); }
+        window.confirmClear = function() { if(viewMode==='global') { appData=[]; unitNotes={}; knownCompanies=["Default Company"]; currentCompany="Default Company"; } else { appData=appData.filter(i=>i.company!==currentCompany); } renderTable(); closeClearModal(); }
+        window.deleteFile = function(id) { fileToDeleteId=id; document.getElementById('deleteFileModal').classList.remove('hidden'); }
         window.closeDeleteFileModal = function() { document.getElementById('deleteFileModal').classList.add('hidden'); }
-        window.confirmDeleteFile = function() { if(window.fileToDeleteId){ window.appData=window.appData.filter(d=>d.id!==window.fileToDeleteId); renderTable(); closeDeleteFileModal(); } }
+        window.confirmDeleteFile = function() { if(fileToDeleteId){ appData=appData.filter(d=>d.id!==fileToDeleteId); renderTable(); closeDeleteFileModal(); } }
         window.openEditModal = function(id, unit) { document.getElementById('editUnitInput').value=unit; document.getElementById('editFileIndex').value=id; document.getElementById('editModal').classList.remove('hidden'); }
         window.closeEditModal = function() { document.getElementById('editModal').classList.add('hidden'); }
-        window.saveUnitEdit = function() { const newUnit=document.getElementById('editUnitInput').value.trim(); const id=document.getElementById('editFileIndex').value; if(newUnit && id) { const item=window.appData.find(d=>d.id===id); if(item){ item.unit=newUnit; renderTable(); closeEditModal(); } } }
+        window.saveUnitEdit = function() { const newUnit=document.getElementById('editUnitInput').value.trim(); const id=document.getElementById('editFileIndex').value; if(newUnit && id) { const item=appData.find(d=>d.id===id); if(item){ item.unit=newUnit; renderTable(); closeEditModal(); } } }
 
-        // PDF Print
+        window.saveToCloud = async function() {
+            if (localStorage.getItem('admin_mode') === 'true') { alert("Disabled in Admin Mode"); return; }
+            if (!auth || !auth.currentUser) { alert("Login required"); return; }
+            const btn = document.getElementById('btnSaveCloud');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            try {
+                await setDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"), {
+                    version: 2, appData, unitNotes, knownCompanies, lastUpdated: new Date().toISOString()
+                });
+                btn.innerHTML = '<i class="fas fa-check"></i>';
+                setTimeout(() => btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i>', 2000);
+            } catch(e) { alert(e.message); } finally { btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i>'; }
+        };
+
+        window.loadFromCloud = async function() {
+            if (localStorage.getItem('admin_mode') === 'true') { alert("Disabled in Admin Mode"); return; }
+            if (!auth || !auth.currentUser) { alert("Login required"); return; }
+            const btn = document.getElementById('btnLoadCloud');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            try {
+                const snap = await getDoc(doc(db, "users", auth.currentUser.uid, "data", "1099_backup"));
+                if(snap.exists()) {
+                    const json = snap.data();
+                    if(confirm("Load backup from " + new Date(json.lastUpdated).toLocaleString() + "?")) {
+                        appData = json.appData || [];
+                        unitNotes = json.unitNotes || {};
+                        knownCompanies = json.knownCompanies || ["Default Company"];
+                        currentCompany = appData.length ? (appData[appData.length-1].company || knownCompanies[0]) : knownCompanies[0];
+                        updateCompanyDropdown(); 
+                        renderTable();
+                    }
+                } else alert("No backup found.");
+            } catch(e) { alert(e.message); } finally { btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i>'; }
+        };
+
+        window.backupData = function() {
+            if(appData.length===0) return;
+            const blob = new Blob([JSON.stringify({ version: 2, appData, unitNotes, knownCompanies },null,2)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `backup.json`; a.click();
+        }
+        
+        window.restoreData = function(input) {
+            const file = input.files[0]; if(!file) return;
+            const r = new FileReader();
+            r.onload = e => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    if(Array.isArray(json)) { appData=json; unitNotes={}; } 
+                    else { appData=json.appData||[]; unitNotes=json.unitNotes||{}; knownCompanies=json.knownCompanies||["Default Company"]; }
+                    currentCompany = appData.length ? (appData[appData.length-1].company || knownCompanies[0]) : knownCompanies[0];
+                    updateCompanyDropdown(); renderTable();
+                } catch(err) { alert("Invalid backup."); }
+            };
+            r.readAsText(file); input.value='';
+        }
+
         window.printReport = function() {
             const tbody = document.getElementById('dataTableBody');
             if(tbody.innerText.includes("No data")) return;
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            doc.setFontSize(16); doc.text(window.viewMode==='current'?`Settlement Report: ${window.currentCompany}`:"Global Yearly Settlement Report",14,20);
-            doc.setFontSize(10); doc.text("Generated: " + new Date().toLocaleString(), 14, 28);
+            doc.setFontSize(16); doc.text(viewMode==='current'?`Settlement Report: ${currentCompany}`:"Global Report",14,20);
             
-            let filteredData = (window.viewMode === 'current') ? window.appData.filter(i => i.company === window.currentCompany) : window.appData;
+            let filteredData = (viewMode === 'current') ? appData.filter(i => i.company === currentCompany) : appData;
             const agg = {};
             filteredData.forEach(item => {
-                let k = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
+                let key = (item.unit && item.unit !== "Unknown") ? item.unit.toUpperCase() : item.name.toUpperCase();
                 if(!agg[k]) agg[k]={unit:item.unit,name:item.name,total:0};
                 agg[k].total+=item.amount;
                 if(agg[k].name==="Unknown"&&item.name!=="Unknown") agg[k].name=item.name;
             });
             const own=[], drv=[];
             Object.values(agg).forEach(i=>(i.unit&&i.unit!=="")?own.push(i):drv.push(i));
-            const sortFn = (a,b) => { if(a.unit&&b.unit){const nA=parseInt(a.unit.replace(/\D/g,'')),nB=parseInt(b.unit.replace(/\D/g,''));if(!isNaN(nA)&&!isNaN(nB))return nA-nB;} return (a.name||"").localeCompare(b.name||""); };
+            const sortFn = (a, b) => {
+                if (a.unit && b.unit) { const nA = parseInt(a.unit.replace(/\D/g,'')), nB = parseInt(b.unit.replace(/\D/g,'')); if(!isNaN(nA)&&!isNaN(nB)) return nA-nB; }
+                return (a.name||"").localeCompare(b.name||"");
+            };
             own.sort(sortFn); drv.sort(sortFn);
 
             let y=35;
@@ -645,35 +523,9 @@
                 y = doc.lastAutoTable.finalY + 15;
             }
             const total = filteredData.reduce((a,c)=>a+c.amount,0);
-            if(own.length && drv.length) {
-                doc.text("GRAND TOTAL: $"+total.toLocaleString('en-US',{minimumFractionDigits:2}), doc.internal.pageSize.getWidth()-14, y, {align:'right'});
-            }
+            doc.text("GRAND TOTAL: $"+total.toLocaleString('en-US',{minimumFractionDigits:2}), 180, y, {align:'right'});
             doc.save("Report.pdf");
         };
-
-        // --- BACKUP/RESTORE ---
-        window.backupData = function() {
-            if(window.appData.length===0) return;
-            const blob = new Blob([JSON.stringify({ version: 2, appData: window.appData, unitNotes: window.unitNotes, knownCompanies: window.knownCompanies },null,2)], {type: "application/json"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = `1099_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
-        }
-        
-        window.restoreData = function(input) {
-            const file = input.files[0]; if(!file) return;
-            const r = new FileReader();
-            r.onload = e => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    if(Array.isArray(json)) { window.appData=json; window.unitNotes={}; } 
-                    else { window.appData=json.appData||[]; window.unitNotes=json.unitNotes||{}; window.knownCompanies=json.knownCompanies||["Default Company"]; }
-                    window.currentCompany = window.appData.length ? (window.appData[window.appData.length-1].company || window.knownCompanies[0]) : window.knownCompanies[0];
-                    updateCompanyDropdown(); renderTable();
-                } catch(err) { alert("Invalid backup."); }
-            };
-            r.readAsText(file); input.value='';
-        }
     </script>
 </body>
 </html>
