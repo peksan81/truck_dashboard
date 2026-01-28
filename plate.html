@@ -12,7 +12,7 @@
         textarea { width: 100%; height: 80px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: monospace; }
         
         /* Dugmici u headeru */
-        .btn-container { margin-top: 5px; display: flex; gap: 10px; align-items: center; }
+        .btn-container { margin-top: 5px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         
         .btn-main { background: #2563eb; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
         .btn-main:hover { background: #1d4ed8; }
@@ -20,6 +20,13 @@
         /* Crveno dugme za reset */
         .btn-reset { background: #ef4444; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
         .btn-reset:hover { background: #dc2626; }
+
+        /* Siva dugmad za Backup/Restore */
+        .btn-tool { background: #4b5563; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .btn-tool:hover { background: #374151; }
+
+        /* Spacer da gurne backup desno */
+        .spacer { flex-grow: 1; }
 
         /* VALIDACIJA KUTIJA */
         #validation-box { 
@@ -86,6 +93,13 @@
     <div class="btn-container">
         <button class="btn-main" onclick="processData()">NAPRAVI KARTICE</button>
         <button class="btn-reset" onclick="resetAll()">RESET (NOVI SPISAK)</button>
+        
+        <div class="spacer"></div>
+        
+        <button class="btn-tool" onclick="backupData()">💾 BACKUP (SAČUVAJ)</button>
+        <button class="btn-tool" onclick="triggerRestore()">📂 RESTORE (UČITAJ)</button>
+        <!-- Skriveni input za fajl -->
+        <input type="file" id="restoreInput" style="display: none;" onchange="restoreFile(this)" accept=".json">
     </div>
     <!-- KUTIJA ZA VALIDACIJU -->
     <div id="validation-box"></div>
@@ -119,6 +133,10 @@
         const text = document.getElementById('rawInput').value;
         const blocks = text.split('--------------------');
         
+        // Ako već imamo podatke, ne briši ih, samo dodaj nove ako je polje popunjeno
+        // Ali pošto je ovo "NAPRAVI KARTICE" dugme, obično podrazumeva procesiranje unosa.
+        // Resetujemo niz samo ako je ovo novi unos, ali za sada neka resetuje kao ranije
+        // da ne duplira ako se klikne više puta na isti tekst.
         drivers = [];
 
         blocks.forEach(block => {
@@ -297,6 +315,95 @@
             if (words2.includes(w)) return true;
         }
         return false;
+    }
+
+    // --- BACKUP & RESTORE FUNKCIJE ---
+
+    function backupData() {
+        if (drivers.length === 0 && document.getElementById('rawInput').value === "") {
+            alert("Nema podataka za čuvanje.");
+            return;
+        }
+
+        const data = {
+            drivers: drivers,
+            rawInput: document.getElementById('rawInput').value,
+            validationHtml: document.getElementById('validation-box').innerHTML,
+            validationDisplay: document.getElementById('validation-box').style.display,
+            validationStyle: {
+                background: document.getElementById('validation-box').style.background,
+                color: document.getElementById('validation-box').style.color,
+                border: document.getElementById('validation-box').style.border
+            }
+        };
+
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        
+        // Formatiranje datuma za ime fajla
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        
+        const filename = `organizer_backup_${year}-${month}-${day}_${hours}-${minutes}.json`;
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function triggerRestore() {
+        document.getElementById('restoreInput').click();
+    }
+
+    // ISPRAVKA: Funkcija sada prihvata 'input' element direktno
+    function restoreFile(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.drivers && Array.isArray(data.drivers)) {
+                    drivers = data.drivers;
+                    document.getElementById('rawInput').value = data.rawInput || '';
+                    
+                    // Vraćanje stanja validacije
+                    const valBox = document.getElementById('validation-box');
+                    if (data.validationHtml) {
+                        valBox.innerHTML = data.validationHtml;
+                        valBox.style.display = data.validationDisplay || 'none';
+                        if (data.validationStyle) {
+                            valBox.style.background = data.validationStyle.background;
+                            valBox.style.color = data.validationStyle.color;
+                            valBox.style.border = data.validationStyle.border;
+                        }
+                    } else {
+                        valBox.style.display = 'none';
+                    }
+
+                    render();
+                    alert("Podaci su uspešno učitani!");
+                } else {
+                    alert("Neispravan format fajla.");
+                }
+            } catch (err) {
+                alert("Greška pri čitanju fajla.");
+                console.error(err);
+            }
+            // Reset inputa da bi se isti fajl mogao ponovo učitati ako treba
+            input.value = ''; 
+        };
+        reader.readAsText(file);
     }
 
     function render() {
